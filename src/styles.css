@@ -1,0 +1,23 @@
+.cad-viewer-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.cad-viewer-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+.cad-viewer-webgl-canvas {
+  position: relative;
+  z-index: 0;
+}
+
+.cad-viewer-text-overlay {
+  display: block;
+  contain: strict;
+  user-select: none;
+}

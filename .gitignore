@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-demo/
+coverage/
+*.tsbuildinfo
+
+# Generated demo/runtime assets
+public/wasm/
+
+# Package artifacts
+*.tgz
+.npm/
+.pnpm-store/
+
+# Cloudflare / Wrangler local state
+.wrangler/
+.dev.vars
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/
+.cache/
+.parcel-cache/
+.turbo/

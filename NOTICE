@@ -1,0 +1,11 @@
+@flyfish-dev/cad-viewer
+
+This project is licensed under AGPL-3.0-only.
+
+This project includes optional/default integrations with third-party open-source projects:
+
+- @mlightcad/libredwg-web: DWG parsing in the browser through LibreDWG WebAssembly. License: GPL-3.0-only.
+- dxf-parser: DXF parser for JavaScript. License: MIT.
+- fflate: ZIP/DEFLATE utilities for DWFx/XPS package parsing. License: MIT.
+
+Classic DWF support is intentionally limited to package detection and DWFx/XPS-compatible 2D content. Full classic DWF WHIP/W2D coverage normally requires Autodesk/ODA DWF Toolkit or an equivalent implementation.

@@ -1,0 +1,99 @@
+{
+  "name": "@flyfish-dev/cad-viewer",
+  "version": "0.5.3",
+  "description": "A production-oriented lightweight frontend CAD viewer for DWG, DXF and DWFx/DWF preview, built with TypeScript, WebGL, Canvas overlays and worker-backed DWG WebAssembly parsing.",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "author": "Yu Wang",
+  "homepage": "https://cad-viewer.pages.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flyfish-dev/cad-viewer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/flyfish-dev/cad-viewer/issues"
+  },
+  "keywords": [
+    "cad",
+    "dwg",
+    "dxf",
+    "dwf",
+    "dwfx",
+    "autocad",
+    "viewer",
+    "canvas",
+    "typescript",
+    "frontend",
+    "libredwg",
+    "web-worker",
+    "wasm",
+    "webgl",
+    "gpu",
+    "cad-viewer"
+  ],
+  "sideEffects": [
+    "*.css",
+    "./dist/style.css",
+    "./src/styles.css",
+    "./demo/styles.css"
+  ],
+  "main": "./dist/cad-viewer.umd.cjs",
+  "module": "./dist/cad-viewer.es.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/cad-viewer.es.js",
+      "require": "./dist/cad-viewer.umd.cjs",
+      "default": "./dist/cad-viewer.es.js"
+    },
+    "./styles.css": "./dist/style.css",
+    "./package.json": "./package.json",
+    "./style.css": "./dist/style.css",
+    "./wasm/libredwg-web.wasm": "./dist/wasm/libredwg-web.wasm",
+    "./wasm/libredwg-web.js": "./dist/wasm/libredwg-web.js",
+    "./dist/index.js": "./dist/index.js",
+    "./dist/index.d.ts": "./dist/index.d.ts"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "clean": "node ./scripts/clean.cjs",
+    "copy:wasm": "node ./scripts/copy-libredwg-wasm.cjs",
+    "dev": "npm run copy:wasm && vite --config vite.config.ts --host 0.0.0.0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:types": "tsc -p tsconfig.build.json",
+    "build:lib": "npm run copy:wasm && vite build --config vite.lib.config.ts && npm run build:types && npm run build:assets",
+    "build:demo": "npm run copy:wasm && vite build --config vite.config.ts",
+    "build": "npm run clean && npm run typecheck && npm run build:lib && npm run build:demo",
+    "preview": "npm run build:demo && vite preview --config vite.config.ts --host 0.0.0.0",
+    "pack:dry": "npm pack --dry-run",
+    "release:npm": "npm publish --access public",
+    "pages:dev": "npm run build:demo && wrangler pages dev dist-demo",
+    "deploy:pages": "npm run build:demo && wrangler pages deploy dist-demo --project-name cad-viewer",
+    "prepublishOnly": "npm run clean && npm run typecheck && npm run build:lib && npm run pack:dry",
+    "build:worker-check": "npm run typecheck && npm run build:demo",
+    "check:wasm": "node ./scripts/check-wasm.cjs",
+    "build:assets": "node ./scripts/copy-dist-assets.cjs",
+    "preview:demo": "npm run preview"
+  },
+  "dependencies": {
+    "@mlightcad/libredwg-web": "^0.7.2",
+    "dxf-parser": "^1.1.2",
+    "fflate": "^0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.11",
+    "wrangler": "^4.20.0"
+  }
+}

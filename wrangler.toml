@@ -1,0 +1,3 @@
+name = "cad-viewer"
+pages_build_output_dir = "dist-demo"
+compatibility_date = "2026-06-11"

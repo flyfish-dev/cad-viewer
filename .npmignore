@@ -1,0 +1,9 @@
+src/
+demo/
+docs/
+scripts/
+public/
+.github/
+*.config.ts
+tsconfig*.json
+wrangler.toml
