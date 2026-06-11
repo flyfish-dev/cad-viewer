@@ -5,7 +5,7 @@
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-b31b1b.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@flyfish-dev/cad-viewer.svg)](https://www.npmjs.com/package/@flyfish-dev/cad-viewer)
 
-**在线 Demo：** [cad-viewer.pages.dev](https://cad-viewer.pages.dev)  
+**在线 Demo：** [cad-viewer-iys.pages.dev](https://cad-viewer-iys.pages.dev)  
 **源码仓库：** [github.com/flyfish-dev/cad-viewer](https://github.com/flyfish-dev/cad-viewer)
 
 本仓库提供面向浏览器的 loader 架构，支持 **DWG**、**DXF**、以及 **DWFx/XPS 兼容 DWF 预览**，将不同 CAD 格式归一化为统一 `CadDocument`，并通过 WebGL retained-mode 渲染，文字/图片使用轻量 Canvas overlay。文件在浏览器本地读取，组件不会把图纸上传到服务端。

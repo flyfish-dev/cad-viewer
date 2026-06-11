@@ -5,7 +5,7 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "author": "Yu Wang",
-  "homepage": "https://cad-viewer.pages.dev",
+  "homepage": "https://cad-viewer-iys.pages.dev",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/flyfish-dev/cad-viewer.git"

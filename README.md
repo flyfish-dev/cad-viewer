@@ -5,7 +5,7 @@ A professional, lightweight, extensible **frontend CAD viewer** for modern brows
 [![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-b31b1b.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@flyfish-dev/cad-viewer.svg)](https://www.npmjs.com/package/@flyfish-dev/cad-viewer)
 
-**Live demo:** [cad-viewer.pages.dev](https://cad-viewer.pages.dev)  
+**Live demo:** [cad-viewer-iys.pages.dev](https://cad-viewer-iys.pages.dev)  
 **Source:** [github.com/flyfish-dev/cad-viewer](https://github.com/flyfish-dev/cad-viewer)
 
 The project provides a clean loader architecture for **DWG**, **DXF** and **DWFx/XPS-compatible DWF preview**, normalizes format-specific data into a common `CadDocument`, and renders it through a retained WebGL pipeline with a lightweight Canvas overlay for text and images. Files are read locally in the browser; the viewer does not upload drawings to a backend.
