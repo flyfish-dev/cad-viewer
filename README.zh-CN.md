@@ -12,6 +12,11 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.6.2 变更
+
+- 原生 DWF 通道升级到 `dwf-viewer` 0.6.4，包含上游 DWF/DWFx bugfix；本包继续按自身 SemVer 发布为 0.6.2。
+- 已确认当前暴露的 `CadViewer` DWF/XPS 配置项仍与最新版 `dwf-viewer` API 匹配。
+
 ## 0.6.1 变更
 
 - 原生 DWF 通道升级到 `dwf-viewer` 0.6.1。

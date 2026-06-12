@@ -1,6 +1,6 @@
 {
   "name": "@flyfish-dev/cad-viewer",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "A production-oriented lightweight frontend CAD viewer for DWG, DXF, DWF, DWFx and XPS, built with TypeScript, worker-backed DWG WebAssembly parsing, native dwf-viewer integration, WebGL 2D/3D rendering and Canvas overlays.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -96,7 +96,7 @@
   },
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.2",
-    "dwf-viewer": "^0.6.1",
+    "dwf-viewer": "^0.6.4",
     "dxf-parser": "^1.1.2"
   },
   "devDependencies": {

@@ -12,6 +12,11 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 
 > DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.6.2
+
+- Updated the native DWF path to `dwf-viewer` 0.6.4 for upstream DWF/DWFx bug fixes while keeping this package on its own SemVer line.
+- Verified the exposed `CadViewer` DWF/XPS options still match the current `dwf-viewer` API.
+
 ## What changed in 0.6.1
 
 - Updated the native DWF path to `dwf-viewer` 0.6.1.

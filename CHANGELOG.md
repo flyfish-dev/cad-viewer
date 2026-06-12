@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2
+
+### Changed
+
+- Updated `dwf-viewer` to 0.6.4 to pick up upstream DWF/DWFx bug fixes.
+- Kept the existing `CadViewer` DWF/XPS options aligned with the 0.6.4 `DwfViewerOptions` and `LoadOptions` API.
+
 ## 0.6.1
 
 ### Added
