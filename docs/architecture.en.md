@@ -6,7 +6,7 @@ Lightweight CAD Viewer is intentionally split into three layers: format loaders,
 
 - Keep DWG, DXF and DWF parsing isolated.
 - Avoid format-specific assumptions inside renderers; WebGL and Canvas2D are interchangeable.
-- Make unsupported entities visible in diagnostics instead of silently failing.
+- Surface parser diagnostics and skipped entity counts without interrupting preview.
 - Keep the default WebGL renderer lightweight and framework-independent with a Canvas2D fallback.
 
 ## Data flow
@@ -16,17 +16,12 @@ File / ArrayBuffer
   ↓
 CadLoaderRegistry.detect()
   ↓
-DwgLoader.load() / DxfLoader.load() / DwfLoader.load()
+DWG: DwgLoader.load() → DwgWorkerClient → DwgWorker → LibreDWG WASM
+DXF: DxfLoader.load() → CadDocument
+DWF/DWFx/XPS: DwfLoader.mount() → dwf-viewer native renderer
   ↓
-DWG only: DwgWorkerClient → DwgWorker → LibreDWG WASM
-  ↓
-CadDocument
-  ↓
-CadWebGLRenderer.setDocument()
-  ↓
-retained GPU batches + Canvas overlay
-  ↓
-WebGL preview
+DWG/DXF: retained WebGL batches + Canvas overlay
+DWF/DWFx/XPS: W2D/W3D/XPS WebGL/WASM renderer
 ```
 
 ## Key modules
@@ -38,6 +33,7 @@ src/core/geometry.ts    CAD geometry helpers
 src/core/transform.ts   block insert and XPS matrix transforms
 src/loaders/            loader registry and default loaders
 src/loaders/dwg/        worker-backed LibreDWG integration
+src/loaders/dwf/        native dwf-viewer integration
 src/viewer/             component, WebGL renderer and Canvas fallback
 ```
 
@@ -91,6 +87,25 @@ The worker payload intentionally excludes raw parser objects by default. That ke
 
 The loader accepts `AbortSignal`, `workerTimeoutMs`, `workerUrl` and `workerFactory`, so applications can cancel large files and integrate with custom bundler/CDN asset layouts.
 
+
+## Native DWF renderer model
+
+DWF, DWFx and XPS use a native-renderable loader because W2D, W3D/HSF eModel and XPS package content cannot be faithfully represented by the lightweight 2D `CadDocument` scene alone.
+
+```text
+main thread
+  CadViewer.loadFile(file)
+  CadLoaderRegistry detects DWF/DWFx/XPS
+  DwfLoader.mount(input, nativeHost)
+      ↓
+  dwf-viewer parses DWF package/page streams
+  WebGL/WASM renderer draws W2D, W3D/HSF or XPS content
+      ↓
+  CadViewer still exposes summary, metadata and lifecycle controls
+```
+
+`DwfLoader.load()` remains available for programmatic metadata reads. `CadViewer` uses `mount()` when a loader implements `CadNativeRenderableLoader`. This keeps native format renderers isolated without weakening the loader registry contract.
+
 ## Loader contract
 
 Every loader implements:
@@ -103,9 +118,15 @@ interface CadLoader {
   accepts(input: CadLoadInput, bytes?: Uint8Array): boolean;
   load(input: CadLoadInput, options?: CadLoadOptions): Promise<CadLoadResult>;
 }
+
+interface CadNativeRenderableLoader extends CadLoader {
+  nativeRenderer: true;
+  mount(input: CadLoadInput, host: HTMLElement, options?: CadLoadOptions): Promise<CadLoadResult>;
+  unmount(): void;
+}
 ```
 
-Loaders should return a `CadDocument`, not renderer-specific draw calls. That keeps WebGL, Canvas2D, SVG export and thumbnail renderers on the same data layer.
+Regular loaders return a `CadDocument`, not renderer-specific draw calls. Native-renderable loaders can additionally implement `mount()` when their format needs a dedicated DOM/WebGL viewer.
 
 ## Normalized scene
 
@@ -114,7 +135,7 @@ A `CadDocument` contains:
 - `layers`: normalized layer metadata.
 - `blocks`: reusable block definitions.
 - `entities`: top-level entities.
-- `pages`: optional page entities for DWFx/XPS.
+- `pages`: optional page entities and native-renderer metadata.
 - `warnings`: non-fatal parsing or rendering limitations.
 - `raw`: optional source parser output for debugging.
 
@@ -128,7 +149,6 @@ The default WebGL renderer supports common preview geometry:
 - INSERT block expansion with translation/rotation/scale.
 - SOLID, TRACE, 3DFACE.
 - HATCH loop preview.
-- DWFx/XPS PATH, Glyphs and image placeholders.
 
 ## Color strategy
 

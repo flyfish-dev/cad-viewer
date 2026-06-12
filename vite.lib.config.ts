@@ -28,11 +28,11 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     rollupOptions: {
-      external: ['dxf-parser', 'fflate'],
+      external: ['dxf-parser', 'dwf-viewer'],
       output: {
         globals: {
           'dxf-parser': 'DxfParser',
-          'fflate': 'fflate'
+          'dwf-viewer': 'DwfViewerPackage'
         }
       },
       onwarn(warning, warn) {
@@ -46,7 +46,7 @@ export default defineConfig({
 
 function libredwgRuntimePatchPlugin(): Plugin {
   return {
-    name: 'cad-viewer:libredwg-runtime-patch',
+    name: 'lightweight-cad-viewer:libredwg-runtime-patch',
     enforce: 'pre',
     resolveId(source, importer) {
       if (source === '../wasm/libredwg-web.js' && importer?.includes('@mlightcad/libredwg-web/lib/libredwg.js')) {

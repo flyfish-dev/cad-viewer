@@ -22,13 +22,15 @@ DXF 由 `DxfLoader` 处理：优先使用 `dxf-parser`，失败时使用内置 f
 - SOLID、TRACE、3DFACE。
 - HATCH boundary loop 预览。
 
-## DWF / DWFx
+## DWF / DWFx / XPS
 
-DWFx 基于 XPS/OPC 包。本项目默认 DWF loader 读取 ZIP 包并渲染 2D `FixedPage` 内容：
+DWF、DWFx 和 XPS 由 `DwfLoader` 通过已发布的 `dwf-viewer` 包处理。该链路使用 native renderer，不再把 DWF 内容简化成 DWG/DXF 的 2D 场景模型。
 
-- `Path Data` 渲染为 Canvas path。
-- `Glyphs` 渲染为文字。
-- `ImageBrush` 渲染为内嵌图片或占位框。
-- 支持基础 matrix transform。
+覆盖的渲染路径包括：
 
-经典 DWF 通常将图形存储在 WHIP/W2D/W3D 流里。本项目会检测这些流并给出明确 unsupported error。完整经典 DWF 需要 WHIP 解码器或 Autodesk/ODA DWF Toolkit，通常需要 WASM 或转换服务。
+- DWF 6+ ZIP 容器包。
+- WHIP/W2D 2D 图纸，支持 WebGL 渲染和可选 WASM raster fallback。
+- W3D/HSF 3D eModel shell geometry，包含模型树和材质元数据。
+- DWFx / OPC / XPS `FixedPage` 页面，包含矢量、文本和图片资源。
+
+`CadViewer` 会识别 native DWF loader，并将其挂载到 `nativeHost`；DWG/DXF 继续走统一 `CadDocument` + retained WebGL renderer。部署时请把 `dwfv-render.wasm` 与 `libredwg-web.wasm` 一起放在 `/wasm` 下，或显式传入 `dwfWasmUrl`。

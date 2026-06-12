@@ -8,10 +8,21 @@
 **在线 Demo：** [cad-viewer-iys.pages.dev](https://cad-viewer-iys.pages.dev)  
 **源码仓库：** [github.com/flyfish-dev/cad-viewer](https://github.com/flyfish-dev/cad-viewer)
 
-本仓库提供面向浏览器的 loader 架构，支持 **DWG**、**DXF**、以及 **DWFx/XPS 兼容 DWF 预览**，将不同 CAD 格式归一化为统一 `CadDocument`，并通过 WebGL retained-mode 渲染，文字/图片使用轻量 Canvas overlay。文件在浏览器本地读取，组件不会把图纸上传到服务端。
+本仓库提供面向浏览器的 loader 架构，支持 **DWG**、**DXF**、**DWF**、**DWFx** 和 **XPS**。DWG/DXF 会归一化为统一 `CadDocument` 并通过 WebGL retained-mode 渲染，文字/图片使用轻量 Canvas overlay；DWF/DWFx/XPS 交给原生 `dwf-viewer` 渲染通道处理 W2D、W3D/HSF eModel 和 XPS 页面内容。文件在浏览器本地读取，组件不会把图纸上传到服务端。
 
-> DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly。DXF 使用 JavaScript 解析器并带内置 fallback。DWFx 使用 XPS `FixedPage` 2D 页面解析。经典 `.dwf` 里的 WHIP/W2D/W3D 流会被检测并给出明确提示；若要完整解码经典 DWF，仍需要专门 WHIP 解码器或 DWF Toolkit/WASM 实现。
+> DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面和可选 raster WASM fallback。
 
+
+## 0.6.0 变更
+
+- 使用已发布的 `dwf-viewer` 原生渲染器替换旧 DWFx/XPS 子集解析器。
+- DWF/DWFx/XPS 不再强行转成普通 DWG/DXF 的 2D `CadDocument` 渲染链路，而是通过专用 native viewer 挂载。
+- 新增 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面，以及 dwf-viewer WebGL/WASM 渲染后端集成。
+- 新增 `CadNativeRenderableLoader`，允许某些格式挂载自己的 DOM/WebGL 渲染器。
+- 新增 `dwfWasmUrl`、`dwfPreferWebgl`、`dwfPreferWasm`、`dwfMaxCanvasPixels`、`dwfMaxGpuCacheBytes` 等生产配置。
+- 运行时资源脚本现在会同时复制和校验 `libredwg-web.wasm` 与 `dwfv-render.wasm`。
+- 删除旧 classic-DWF warning 逻辑，并移除本包对 `fflate` 的依赖。
+- 包许可证更新为 AGPL-3.0-only，以匹配集成后的 DWF 渲染器。
 
 ## 0.5.3 变更
 
@@ -49,10 +60,10 @@
 ## 功能特性
 
 - **纯前端组件**：`new CadViewer({ container })` 或 `new CadViewer({ canvas })`。
-- **正确的 loader 架构**：DWG / DXF / DWF 独立 loader，可替换、可扩展。
+- **正确的 loader 架构**：DWG / DXF / DWF 独立 loader，可替换、可扩展；native-renderable loader 可以挂载自己的优化渲染器。
 - **DWG 预览**：通过 LibreDWG WebAssembly 在浏览器本地解析，默认在 Web Worker 中执行。
 - **DXF 预览**：JavaScript 解析，支持常见 ASCII DXF `ENTITIES`，并带 fallback parser。
-- **DWF/DWFx 预览**：支持 DWFx/XPS 2D `FixedPage` 的 Path、Glyphs、图片预览。
+- **DWF/DWFx/XPS 预览**：由 `dwf-viewer` 支持 DWF ZIP 包、W2D 2D 图纸、W3D/HSF eModel、DWFx/OPC/XPS 页面和 raster fallback。
 - **CAD 颜色处理**：支持 ACI、BYLAYER、BYBLOCK 继承、DWG 图层颜色、true color、填充色、透明度和自适应对比度。
 - **WebGL 高性能交互**：GPU retained buffers、空间分桶、视口裁剪、缩放、平移、适配窗口、世界坐标、缩放百分比。
 - **专业 Demo**：拖拽打开、紧凑工具栏、状态条、解析/渲染耗时、实体类型统计、warnings 展示。
@@ -71,16 +82,16 @@ npm install
 npm run dev
 ```
 
-DWG loader 需要将 LibreDWG WASM 文件放到公开目录。Demo 使用以下命令复制并校验到 `public/wasm`：
+DWG 和 DWF 渲染链路需要将运行时 WASM 文件放到公开目录。Demo 使用以下命令复制并校验到 `public/wasm`：
 
 ```bash
 npm run copy:wasm
 npm run check:wasm
 ```
 
-Demo 会先把 `wasmPath` 解析为绝对 URL，再发送给 worker。你自己的应用也建议使用绝对路径或绝对 URL，例如 `/wasm` 或 `new URL('wasm/', document.baseURI).href`。不要直接把未解析的 `./wasm` 传入 worker，否则它可能会相对于 worker chunk 请求资源。
+Demo 会先把 `wasmPath` 解析为绝对 URL，再发送给 DWG worker，并复用同一目录查找 `dwfv-render.wasm`。你自己的应用也建议使用绝对路径或绝对 URL，例如 `/wasm` 或 `new URL('wasm/', document.baseURI).href`。不要直接把未解析的 `./wasm` 传入 worker，否则它可能会相对于 worker chunk 请求资源。
 
-发布 npm 包时，`build:lib` 也会把这些文件复制到 `dist/wasm` 并作为 package subpath 暴露出来。应用侧仍需要把 `.wasm` 放到可公开访问的 URL，并把该目录传给 `wasmPath`。
+发布 npm 包时，`build:lib` 会把这些文件复制到 `dist/wasm` 并作为 package subpath 暴露出来。应用侧仍需要把 `.wasm` 放到可公开访问的 URL，并把该目录传给 `wasmPath`，或者显式传入 `dwfWasmUrl`。
 
 
 ## Demo 启动说明
@@ -110,6 +121,7 @@ const viewer = new CadViewer({
   container: document.querySelector('#viewer')!,
   renderer: 'auto',       // WebGL first, Canvas2D fallback
   wasmPath: new URL('wasm/', document.baseURI).href,
+  dwfWasmUrl: new URL('wasm/dwfv-render.wasm', document.baseURI).href,
   canvasOptions: {
     background: '#05070d',
     foreground: '#f8fafc',
@@ -177,6 +189,7 @@ const controller = new AbortController();
 const viewer = new CadViewer({
   container,
   wasmPath: new URL('wasm/', document.baseURI).href,
+  dwfWasmUrl: new URL('wasm/dwfv-render.wasm', document.baseURI).href,
   useWorker: true,
   workerTimeoutMs: 120_000,
   onLoadProgress(progress) {
@@ -197,6 +210,7 @@ controller.abort();
 new CadViewer({
   container,
   wasmPath: new URL('wasm/', document.baseURI).href,
+  dwfWasmUrl: new URL('wasm/dwfv-render.wasm', document.baseURI).href,
   workerUrl: new URL('/assets/dwg-worker.js', window.location.origin)
 });
 ```
@@ -256,11 +270,8 @@ CadLoaderRegistry
   ↓
 DwgLoader | DxfLoader | DwfLoader | 自定义 loader
   ↓
-CadDocument
-  ↓
-CadWebGLRenderer | CadCanvasRenderer fallback
-  ↓
-WebGL preview + Canvas overlay
+DWG/DXF：CadDocument → CadWebGLRenderer | CadCanvasRenderer fallback
+DWF/DWFx/XPS：DwfLoader.mount() → dwf-viewer native WebGL/WASM renderer
 ```
 
 所有 loader 都输出统一的 `CadDocument`：
@@ -312,8 +323,8 @@ viewer.registerLoader({
 |---|---|---|
 | DWG | `DwgLoader` | 使用 LibreDWG WebAssembly。渲染完整度取决于 LibreDWG converter 暴露出的实体。 |
 | DXF | `DxfLoader` | 使用 `dxf-parser` + 内置 fallback。支持基础实体、block/insert、颜色/图层、多段线、文字、hatch boundary、spline 预览。 |
-| DWFx / XPS | `DwfLoader` | 解析 ZIP/OPC 包，并渲染 2D `FixedPage` path/glyph/image 内容。 |
-| 经典 DWF | `DwfLoader` 检测 | 能检测 WHIP/W2D/W3D 包内容并给出明确错误。完整经典 DWF 需要专门 WHIP 解码器或 DWF Toolkit/WASM。 |
+| DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、模型树元数据以及 WebGL/WASM 渲染。 |
+| DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS 页面，包含 vector path、文本、图片和包内资源，通过原生 DWF 渲染器展示。 |
 
 ## 颜色处理
 
@@ -357,7 +368,7 @@ npm run pack:dry
 
 ```bash
 npm login
-npm publish --access public
+npm publish --access public --auth-type=web
 ```
 
 仓库内也提供：
@@ -400,12 +411,10 @@ src/
   viewer/        CadViewer 组件和 Canvas renderer
 demo/            专业 Vite demo UI
 docs/            中英文架构/格式文档
-scripts/         clean 和 LibreDWG WASM 复制脚本
+scripts/         clean、运行时 WASM 复制与校验脚本
 public/wasm/     demo 的 WASM 输出目录
 ```
 
 ## 许可证
 
-AGPL-3.0-only。这是严格 copyleft 许可证：如果你分发修改版本，或通过网络提供修改版本服务，请认真审查源码公开义务。
-
-默认 DWG loader 依赖 `@mlightcad/libredwg-web`，该包为 GPL-3.0-only。若用于闭源商业产品，请替换为合规授权的 DWG parser/converter，并重新审查依赖许可证。
+AGPL-3.0-only。默认 DWG loader 集成 `@mlightcad/libredwg-web` / LibreDWG，DWF 渲染器集成 `dwf-viewer`。二开、分发、嵌入或作为应用组成部分使用时，请保留出处和许可证说明。闭源商用产品需要审阅所有依赖许可证，并在授权模型需要时替换对应 loader。

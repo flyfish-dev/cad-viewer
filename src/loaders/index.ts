@@ -15,4 +15,4 @@ export function createDefaultLoaderRegistry(options: CadLoadOptions = {}): CadLo
 export { CadLoaderRegistry } from './CadLoaderRegistry';
 export { DwgLoader, DwgWorkerClient, supportsDwgWorker } from './dwg/DwgLoader';
 export { DxfLoader } from './dxf/DxfLoader';
-export { DwfLoader, DwfUnsupportedError } from './dwf/DwfLoader';
+export { DwfLoader } from './dwf/DwfLoader';

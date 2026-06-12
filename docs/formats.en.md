@@ -22,13 +22,15 @@ Supported preview entities include:
 - SOLID, TRACE, 3DFACE.
 - HATCH boundary loop preview.
 
-## DWF / DWFx
+## DWF / DWFx / XPS
 
-DWFx is based on XPS/OPC packaging. The default DWF loader reads ZIP packages and renders 2D `FixedPage` content:
+DWF, DWFx and XPS are handled by `DwfLoader` through the published `dwf-viewer` package. The viewer path is native-rendered instead of being approximated by the DWG/DXF 2D scene renderer.
 
-- `Path Data` as Canvas paths.
-- `Glyphs` as text.
-- `ImageBrush` as embedded image or placeholder.
-- Basic matrix transforms.
+Covered render paths include:
 
-Classic DWF often stores graphics in WHIP/W2D/W3D streams. This project detects those streams and reports an explicit unsupported error. Full classic DWF coverage requires a WHIP decoder or the Autodesk/ODA DWF Toolkit, normally through WASM or a conversion service.
+- DWF 6+ ZIP container packages.
+- WHIP/W2D 2D sheets with WebGL rendering and optional WASM raster fallback.
+- W3D/HSF 3D eModel shell geometry with model tree and material metadata.
+- DWFx / OPC / XPS `FixedPage` pages with vector, text and image resources.
+
+`CadViewer` detects the native DWF loader and mounts it into a `nativeHost`; DWG/DXF continue to use the normalized `CadDocument` + retained WebGL renderer. Serve `dwfv-render.wasm` beside `libredwg-web.wasm` under `/wasm`, or pass `dwfWasmUrl` explicitly.

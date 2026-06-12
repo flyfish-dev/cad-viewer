@@ -8,7 +8,8 @@ coverage/
 *.tsbuildinfo
 
 # Generated demo/runtime assets
-public/wasm/
+public/wasm/*
+!public/wasm/.gitkeep
 
 # Package artifacts
 *.tgz
@@ -23,6 +24,7 @@ public/wasm/
 .env
 .env.*
 !.env.example
+*.local
 
 # Logs and diagnostics
 *.log

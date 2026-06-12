@@ -1,24 +1,17 @@
-import { unzipSync } from 'fflate';
+import { DwfViewer, openDwfDocument, type LoadedDwfDocument, type PageData, type RenderStats as DwfRenderStats, type W2dPrimitive } from 'dwf-viewer';
 import { createCadDocument, flattenPages } from '../../core/entity';
-import { normalizeXpsColor } from '../../core/color';
-import { decodeUtf8, detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
-import { emptyBounds, includePoint } from '../../core/geometry';
-import { IDENTITY_MATRIX, multiplyMatrix, parseMatrix, transformPoint, type Matrix2D } from '../../core/transform';
-import type { CadDocument, CadEntity, CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader, CadPage, CadPathCommand, CadPoint2D } from '../../core/types';
+import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
+import type { CadDocument, CadEntity, CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadNativeRenderableLoader, CadPage, CadPathCommand, CadPoint3D } from '../../core/types';
 
-export class DwfUnsupportedError extends Error {
-  readonly format = 'dwf';
-  constructor(message: string) {
-    super(message);
-    this.name = 'DwfUnsupportedError';
-  }
-}
-
-export class DwfLoader implements CadLoader {
+export class DwfLoader implements CadNativeRenderableLoader {
   readonly id = 'dwf';
-  readonly label = 'DWFx/XPS 2D package loader';
+  readonly label = 'DWF/DWFx native viewer powered by dwf-viewer';
   readonly formats = ['dwf', 'dwfx', 'xps'] as const;
+  readonly nativeRenderer = true as const;
   private readonly defaults: CadLoadOptions;
+  private native?: DwfViewer;
+  private host?: HTMLElement;
+  private lastStats?: DwfRenderStats;
 
   constructor(defaults: CadLoadOptions = {}) {
     this.defaults = defaults;
@@ -32,319 +25,275 @@ export class DwfLoader implements CadLoader {
   }
 
   async load(input: CadLoadInput, options: CadLoadOptions = {}): Promise<CadLoadResult> {
-    void { ...this.defaults, ...options };
+    const merged = { ...this.defaults, ...options };
     const started = performance.now();
-    const bytes = await readInputBytes(input);
     const sourceName = input.fileName ?? input.file?.name;
-    const ext = extensionOf(input);
-    const packageFiles = openZipPackage(bytes);
-    const pages = parseXpsPages(packageFiles, sourceName);
+    const bytes = await readInputBytes(input);
+    const format = normalizeFormat(detectCadFormat(input, bytes), extensionOf(input));
 
-    if (pages.length === 0) {
-      const entries = Object.keys(packageFiles);
-      const hasWhip = entries.some((name) => /\.(w2d|w3d|whip)$/i.test(name));
-      const hasDwfManifest = entries.some((name) => /manifest|descriptor|eplot/i.test(name));
-      if (hasWhip || ext === 'dwf' || hasDwfManifest) {
-        throw new DwfUnsupportedError('Classic DWF packages usually store geometry in WHIP/W2D/W3D streams. This browser build detects them but does not decode the full classic DWF graphics stream without a DWF Toolkit/WASM implementation. DWFx/XPS 2D pages are supported.');
-      }
-      throw new DwfUnsupportedError('No FixedPage/XPS content found in this DWF/DWFx package.');
-    }
+    merged.onProgress?.({ phase: 'parse', format, message: 'Opening DWF/DWFx with dwf-viewer…', percent: 48 });
+    const loaded = await openDwfDocument(bytes, { fileName: sourceName });
+    merged.onProgress?.({ phase: 'normalize', format, message: 'Reading DWF pages, sheets and model metadata…', percent: 76 });
 
-    const warnings: string[] = [];
-    if (ext === 'dwf') warnings.push('This .dwf package contained XPS/FixedPage-compatible content and was rendered through the DWFx loader path. Classic WHIP/W2D streams are not decoded.');
-    const document = createCadDocument({
-      format: ext === 'dwf' ? 'dwf' : ext === 'xps' ? 'xps' : 'dwfx',
-      sourceName,
-      layers: {},
-      blocks: {},
-      pages,
-      entities: flattenPages(pages),
-      metadata: {
-        parser: 'cad-viewer DWFx/XPS loader',
-        packageEntries: Object.keys(packageFiles).length
-      },
-      warnings,
-      raw: { entries: Object.keys(packageFiles) }
-    });
+    const document = cadDocumentFromDwf(loaded, sourceName, format, merged.keepRaw === true);
     const elapsedMs = performance.now() - started;
-    return { document, raw: document.raw, bytes: bytes.byteLength, elapsedMs, format: document.format, warnings: document.warnings };
+    merged.onProgress?.({ phase: 'done', format: document.format, message: 'DWF/DWFx document ready.', percent: 100, elapsedMs });
+    return { document, raw: merged.keepRaw ? loaded : undefined, bytes: bytes.byteLength, elapsedMs, format: document.format, warnings: document.warnings };
   }
-}
 
-function openZipPackage(bytes: Uint8Array): Record<string, Uint8Array> {
-  if (!(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
-    throw new DwfUnsupportedError('DWF/DWFx loader expects a ZIP/OPC package. Non-ZIP classic DWF streams require a dedicated WHIP decoder.');
+  async mount(input: CadLoadInput, host: HTMLElement, options: CadLoadOptions = {}): Promise<CadLoadResult> {
+    const merged = { ...this.defaults, ...options };
+    const started = performance.now();
+    const sourceName = input.fileName ?? input.file?.name;
+    const bytes = await readInputBytes(input);
+    const format = normalizeFormat(detectCadFormat(input, bytes), extensionOf(input));
+    const wasmUrl = resolveDwfWasmUrl(merged);
+    const background = resolveDwfBackground(merged);
+
+    merged.onProgress?.({ phase: 'native-render', format, message: 'Mounting native DWF renderer…', percent: 28 });
+    this.unmount();
+    this.host = host;
+    host.replaceChildren();
+    this.native = new DwfViewer(host, {
+      wasmUrl,
+      preferWebgl: merged.dwfPreferWebgl ?? true,
+      preferWasm: merged.dwfPreferWasm ?? true,
+      background,
+      maxDevicePixelRatio: merged.dwfMaxDevicePixelRatio ?? 2,
+      maxCanvasPixels: merged.dwfMaxCanvasPixels ?? 16_777_216,
+      maxGpuCacheBytes: merged.dwfMaxGpuCacheBytes ?? 160 * 1024 * 1024,
+      maxCachedScenes: merged.dwfMaxCachedScenes ?? 2
+    });
+
+    merged.onProgress?.({ phase: 'parse', format, message: 'Parsing DWF package and page streams…', percent: 58 });
+    await this.native.load(bytes, {
+      fileName: sourceName,
+      wasmUrl,
+      preferWebgl: merged.dwfPreferWebgl ?? true,
+      preferWasm: merged.dwfPreferWasm ?? true,
+      background,
+      maxGpuCacheBytes: merged.dwfMaxGpuCacheBytes ?? 160 * 1024 * 1024,
+      maxCachedScenes: merged.dwfMaxCachedScenes ?? 2
+    });
+
+    merged.onProgress?.({ phase: 'render', format, message: 'Rendering DWF/DWFx with dwf-viewer…', percent: 88 });
+    this.lastStats = await this.native.render();
+    const loaded = this.native.getDocument();
+    const document = cadDocumentFromDwf(loaded, sourceName, format, merged.keepRaw === true);
+    document.metadata.loaderMode = 'Native DWF';
+    document.metadata.nativeRenderer = 'dwf-viewer';
+    document.metadata.nativeRenderStats = this.lastStats ? { ...this.lastStats, warnings: this.lastStats.warnings.length } : undefined;
+    const elapsedMs = performance.now() - started;
+    merged.onProgress?.({ phase: 'done', format: document.format, message: 'DWF/DWFx rendered.', percent: 100, elapsedMs });
+    return { document, raw: merged.keepRaw ? loaded : undefined, bytes: bytes.byteLength, elapsedMs, format: document.format, warnings: document.warnings };
   }
-  return unzipSync(bytes);
-}
 
-function parseXpsPages(files: Record<string, Uint8Array>, sourceName?: string): CadPage[] {
-  const pageEntries = Object.entries(files)
-    .filter(([name, data]) => /\.fpage$/i.test(name) || decodeUtf8(data.slice(0, Math.min(512, data.byteLength))).includes('<FixedPage'))
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  const pages: CadPage[] = [];
-  for (const [name, data] of pageEntries) {
-    const xml = decodeUtf8(data);
-    if (!xml.includes('<FixedPage')) continue;
-    const page = parseFixedPage(xml, pages.length, name, files, sourceName);
-    if (page) pages.push(page);
+  unmount(): void {
+    this.native?.dispose();
+    this.native = undefined;
+    this.lastStats = undefined;
+    if (this.host) this.host.replaceChildren();
   }
-  return pages;
-}
 
-function parseFixedPage(xml: string, index: number, name: string, files: Record<string, Uint8Array>, sourceName?: string): CadPage | undefined {
-  if (typeof DOMParser === 'undefined') {
-    throw new Error('DWFx/XPS parsing requires DOMParser. Use it in a browser environment or provide a DOMParser polyfill.');
+  fit(): void {
+    this.native?.fit();
   }
-  const doc = new DOMParser().parseFromString(xml, 'application/xml');
-  const root = doc.documentElement;
-  if (!root || !/FixedPage$/i.test(root.nodeName)) return undefined;
-  const width = numberAttr(root, 'Width') ?? 1000;
-  const height = numberAttr(root, 'Height') ?? 1000;
-  const entities: CadEntity[] = [];
 
-  walkElement(root, IDENTITY_MATRIX, (element, matrix) => {
-    const localMatrix = multiplyMatrix(matrix, parseElementTransform(element) ?? IDENTITY_MATRIX);
-    const tag = stripNamespace(element.nodeName);
-    if (tag === 'Path') {
-      const pathEntity = parsePathElement(element, localMatrix, height, index);
-      if (pathEntity) entities.push(pathEntity);
-    } else if (tag === 'Glyphs') {
-      const textEntity = parseGlyphsElement(element, localMatrix, height, index);
-      if (textEntity) entities.push(textEntity);
-    } else if (tag === 'Canvas') {
-      // Children are visited by walkElement with the accumulated transform.
-    } else if (tag === 'ImageBrush') {
-      const image = parseImageBrushElement(element, localMatrix, height, index, name, files);
-      if (image) entities.push(image);
+  zoomIn(): void {
+    const button = (this.native as unknown as { zoomInButton?: HTMLButtonElement } | undefined)?.zoomInButton;
+    button?.click();
+  }
+
+  zoomOut(): void {
+    const button = (this.native as unknown as { zoomOutButton?: HTMLButtonElement } | undefined)?.zoomOutButton;
+    button?.click();
+  }
+
+  resize(): void {
+    void this.native?.render();
+  }
+
+  setNativeOptions(options: CadLoadOptions): void {
+    const native = this.native as unknown as { background?: string; setPreferWebgl?: (value: boolean) => void; setPreferWasm?: (value: boolean) => void; render?: () => Promise<unknown> } | undefined;
+    if (!native) return;
+    if (typeof options.dwfBackground === 'string') native.background = options.dwfBackground;
+    else {
+      const background = resolveDwfBackground(options);
+      if (background) native.background = background;
     }
-    return localMatrix;
+    if (typeof options.dwfPreferWebgl === 'boolean') native.setPreferWebgl?.(options.dwfPreferWebgl);
+    if (typeof options.dwfPreferWasm === 'boolean') native.setPreferWasm?.(options.dwfPreferWasm);
+    void native.render?.();
+  }
+
+  getLastNativeStats(): DwfRenderStats | undefined {
+    return this.lastStats;
+  }
+}
+
+function cadDocumentFromDwf(loaded: LoadedDwfDocument | undefined, sourceName: string | undefined, format: CadFormat, keepRaw: boolean): CadDocument {
+  const warnings = diagnosticsToWarnings(loaded?.diagnostics ?? []);
+  const pages = (loaded?.pageData ?? []).map((page, index) => pageToCadPage(page, index));
+  for (const page of loaded?.pageData ?? []) warnings.push(...diagnosticsToWarnings(page.diagnostics));
+  const metadata = {
+    parser: 'dwf-viewer',
+    nativeRenderer: 'dwf-viewer',
+    dwfKind: loaded?.kind,
+    packageEntries: loaded?.packageEntries?.length ?? 0,
+    resources: loaded?.resources?.length ?? 0,
+    pageKinds: countBy((loaded?.pageData ?? []).map((page) => page.kind)),
+    pageNames: (loaded?.pages ?? []).map((page) => page.name)
+  };
+  return createCadDocument({
+    format,
+    sourceName,
+    layers: {},
+    blocks: {},
+    pages,
+    entities: flattenPages(pages),
+    metadata,
+    warnings: unique(warnings),
+    raw: keepRaw ? loaded : undefined
   });
-
-  return { index, name: sourceName ? `${sourceName} / ${name}` : name, width, height, entities };
 }
 
-function walkElement(element: Element, matrix: Matrix2D, visitor: (element: Element, matrix: Matrix2D) => Matrix2D): void {
-  const local = visitor(element, matrix);
-  for (const child of Array.from(element.children)) walkElement(child, local, visitor);
-}
-
-function parsePathElement(element: Element, matrix: Matrix2D, pageHeight: number, pageIndex: number): CadEntity | undefined {
-  const data = element.getAttribute('Data') ?? findGeometryData(element);
-  if (!data) return undefined;
-  const commands = parseXpsPathData(data)
-    .map((command) => ({
-      cmd: command.cmd,
-      points: command.points.map((p) => pageToCadPoint(transformPoint(p, matrix), pageHeight))
-    }));
-  if (!commands.length) return undefined;
-
-  const stroke = normalizeXpsColor(element.getAttribute('Stroke') ?? undefined);
-  const fill = normalizeXpsColor(element.getAttribute('Fill') ?? undefined);
-  const opacity = numberAttr(element, 'Opacity');
+function pageToCadPage(page: PageData, index: number): CadPage {
+  const entities = pageEntities(page, index);
   return {
-    type: 'XPS_PATH',
-    kind: 'path',
-    commands,
-    color: stroke ?? fill ?? '#ffffff',
-    fillColor: fill,
-    lineweight: numberAttr(element, 'StrokeThickness') ?? 1,
-    opacity,
-    pageIndex,
-    raw: element.outerHTML
+    index,
+    name: page.name || page.sourcePath || `${index + 1}`,
+    width: page.width || 1000,
+    height: page.height || 1000,
+    entities
   };
 }
 
-function parseGlyphsElement(element: Element, matrix: Matrix2D, pageHeight: number, pageIndex: number): CadEntity | undefined {
-  const text = element.getAttribute('UnicodeString') ?? element.getAttribute('Indices') ?? '';
-  if (!text) return undefined;
-  const origin = { x: numberAttr(element, 'OriginX') ?? 0, y: numberAttr(element, 'OriginY') ?? 0 };
-  const p = pageToCadPoint(transformPoint(origin, matrix), pageHeight);
-  return {
-    type: 'DWF_TEXT',
-    kind: 'text',
-    insertionPoint: p,
-    text,
-    textHeight: numberAttr(element, 'FontRenderingEmSize') ?? 12,
-    color: normalizeXpsColor(element.getAttribute('Fill') ?? undefined) ?? '#ffffff',
-    opacity: numberAttr(element, 'Opacity'),
-    pageIndex,
-    raw: element.outerHTML
-  };
-}
-
-function parseImageBrushElement(element: Element, matrix: Matrix2D, pageHeight: number, pageIndex: number, pageName: string, files: Record<string, Uint8Array>): CadEntity | undefined {
-  const src = element.getAttribute('ImageSource');
-  if (!src) return undefined;
-  const viewport = element.getAttribute('Viewport')?.match(/-?\d*\.?\d+(?:[eE][+-]?\d+)?/g)?.map(Number) ?? [];
-  const x = viewport[0] ?? 0;
-  const y = viewport[1] ?? 0;
-  const w = viewport[2] ?? 32;
-  const h = viewport[3] ?? 32;
-  const p = pageToCadPoint(transformPoint({ x, y }, matrix), pageHeight);
-  const imageName = resolvePackagePath(pageName, src);
-  const data = files[imageName.replace(/^\//, '')] ?? files[imageName];
-  return {
-    type: 'DWF_IMAGE',
-    kind: 'image',
-    insertionPoint: p,
-    width: w,
-    height: h,
-    imageSource: src,
-    imageDataUrl: data ? bytesToDataUrl(data, imageName) : undefined,
-    pageIndex,
-    raw: element.outerHTML
-  };
-}
-
-function parseXpsPathData(data: string): CadPathCommand[] {
-  const tokens = data.match(/[AaCcHhLlMmQqSsVvZz]|-?\d*\.?\d+(?:[eE][+-]?\d+)?/g) ?? [];
-  const out: CadPathCommand[] = [];
-  let i = 0;
-  let cmd = '';
-  let current: CadPoint2D = { x: 0, y: 0 };
-  let subpathStart: CadPoint2D = { x: 0, y: 0 };
-  const isCommand = (token: string) => /^[A-Za-z]$/.test(token);
-  const read = () => Number(tokens[i++]);
-  while (i < tokens.length) {
-    if (isCommand(tokens[i])) cmd = tokens[i++];
-    if (!cmd) break;
-    const relative = cmd === cmd.toLowerCase();
-    const upper = cmd.toUpperCase();
-    if (upper === 'Z') {
-      out.push({ cmd: 'Z', points: [] });
-      current = { ...subpathStart };
-      cmd = '';
-      continue;
-    }
-    if (upper === 'M') {
-      const x = read(); const y = read();
-      if (!Number.isFinite(x) || !Number.isFinite(y)) break;
-      current = makePoint(x, y, relative, current);
-      subpathStart = { ...current };
-      out.push({ cmd: 'M', points: [current] });
-      cmd = relative ? 'l' : 'L';
-      continue;
-    }
-    if (upper === 'L') {
-      const x = read(); const y = read();
-      if (!Number.isFinite(x) || !Number.isFinite(y)) break;
-      current = makePoint(x, y, relative, current);
-      out.push({ cmd: 'L', points: [current] });
-      continue;
-    }
-    if (upper === 'H') {
-      const x = read();
-      if (!Number.isFinite(x)) break;
-      current = { x: relative ? current.x + x : x, y: current.y };
-      out.push({ cmd: 'L', points: [current] });
-      continue;
-    }
-    if (upper === 'V') {
-      const y = read();
-      if (!Number.isFinite(y)) break;
-      current = { x: current.x, y: relative ? current.y + y : y };
-      out.push({ cmd: 'L', points: [current] });
-      continue;
-    }
-    if (upper === 'C') {
-      const p1 = makePoint(read(), read(), relative, current);
-      const p2 = makePoint(read(), read(), relative, current);
-      const p3 = makePoint(read(), read(), relative, current);
-      if (![p1.x, p1.y, p2.x, p2.y, p3.x, p3.y].every(Number.isFinite)) break;
-      current = p3;
-      out.push({ cmd: 'C', points: [p1, p2, p3] });
-      continue;
-    }
-    if (upper === 'Q' || upper === 'S') {
-      const p1 = makePoint(read(), read(), relative, current);
-      const p2 = makePoint(read(), read(), relative, current);
-      if (![p1.x, p1.y, p2.x, p2.y].every(Number.isFinite)) break;
-      current = p2;
-      out.push({ cmd: 'Q', points: [p1, p2] });
-      continue;
-    }
-    if (upper === 'A') {
-      // XPS/SVG elliptical arc: rx ry xrot largeArc sweep x y. Canvas renderer approximates it as a line to the endpoint.
-      read(); read(); read(); read(); read();
-      const end = makePoint(read(), read(), relative, current);
-      if (![end.x, end.y].every(Number.isFinite)) break;
-      current = end;
-      out.push({ cmd: 'L', points: [end] });
-      continue;
-    }
-    break;
+function pageEntities(page: PageData, pageIndex: number): CadEntity[] {
+  if (page.kind === 'w2d-text') return page.primitives.flatMap((primitive, index) => primitiveToEntity(primitive, pageIndex, index));
+  if (page.kind === 'image') {
+    return [{ type: 'DWF_IMAGE_PAGE', kind: 'image', pageIndex, width: page.width, height: page.height, imageSource: page.sourcePath }];
   }
+  if (page.kind === 'w3d-model') {
+    return page.model.meshes.map((mesh, index) => ({
+      id: mesh.id,
+      type: 'W3D_MESH',
+      kind: 'solid',
+      pageIndex,
+      color: mesh.color ? rgbToHex(mesh.color) : undefined,
+      name: mesh.name || `mesh-${index + 1}`,
+      raw: { vertexCount: mesh.vertexCount, triangleCount: mesh.triangleCount, materialId: mesh.materialId }
+    }));
+  }
+  if (page.kind === 'xps-fixed-page') {
+    return [{ type: 'XPS_FIXED_PAGE', kind: 'viewport', pageIndex, width: page.width, height: page.height, raw: { sourcePath: page.sourcePath } }];
+  }
+  return [{ type: 'DWF_PAGE', kind: 'viewport', pageIndex, width: page.width, height: page.height, raw: { sourcePath: page.sourcePath } }];
+}
+
+function primitiveToEntity(primitive: W2dPrimitive, pageIndex: number, index: number): CadEntity[] {
+  const base = {
+    id: `dwf-${pageIndex}-${index}`,
+    pageIndex,
+    color: primitive.stroke,
+    fillColor: primitive.fill,
+    lineweight: primitive.lineWidth,
+    raw: { matrix: primitive.matrix }
+  } satisfies Partial<CadEntity>;
+  if (primitive.type === 'polyline' || primitive.type === 'polygon') {
+    return [{
+      ...base,
+      type: primitive.type === 'polygon' ? 'DWF_POLYGON' : 'DWF_POLYLINE',
+      kind: 'polyline',
+      vertices: pointsArrayToCadPoints(primitive.points),
+      isClosed: primitive.type === 'polygon'
+    }];
+  }
+  if (primitive.type === 'path') {
+    return [{ ...base, type: 'DWF_PATH', kind: 'path', commands: primitive.commands as unknown as CadPathCommand[] }];
+  }
+  if (primitive.type === 'text') {
+    return [{
+      ...base,
+      type: 'DWF_TEXT',
+      kind: 'text',
+      insertionPoint: { x: primitive.x, y: primitive.y, z: 0 },
+      text: primitive.text,
+      textHeight: primitive.size
+    }];
+  }
+  if (primitive.type === 'rect') {
+    const x = primitive.x;
+    const y = primitive.y;
+    const w = primitive.width;
+    const h = primitive.height;
+    return [{
+      ...base,
+      type: 'DWF_RECT',
+      kind: 'polyline',
+      isClosed: true,
+      vertices: [
+        { x, y, z: 0 },
+        { x: x + w, y, z: 0 },
+        { x: x + w, y: y + h, z: 0 },
+        { x, y: y + h, z: 0 }
+      ]
+    }];
+  }
+  return [];
+}
+
+function pointsArrayToCadPoints(points: number[]): CadPoint3D[] {
+  const out: CadPoint3D[] = [];
+  for (let i = 0; i + 1 < points.length; i += 2) out.push({ x: points[i], y: points[i + 1], z: 0 });
   return out;
 }
 
-function makePoint(x: number, y: number, relative: boolean, current: CadPoint2D): CadPoint2D {
-  return relative ? { x: current.x + x, y: current.y + y } : { x, y };
+function diagnosticsToWarnings(diagnostics: readonly { level: string; code: string; message: string; source?: string }[]): string[] {
+  return diagnostics
+    .filter((item) => item.level !== 'info')
+    .map((item) => `${item.code}: ${item.message}${item.source ? ` (${item.source})` : ''}`);
 }
 
-function pageToCadPoint(point: CadPoint2D, pageHeight: number): CadPoint2D {
-  return { x: point.x, y: pageHeight - point.y };
+function normalizeFormat(detected: CadFormat, ext: string): CadFormat {
+  if (ext === 'dwf' || ext === 'dwfx' || ext === 'xps') return ext;
+  if (detected === 'dwf' || detected === 'dwfx' || detected === 'xps') return detected;
+  return 'dwf';
 }
 
-function findGeometryData(element: Element): string | undefined {
-  for (const child of Array.from(element.children)) {
-    if (/PathGeometry$/i.test(child.nodeName)) {
-      const figures = child.getAttribute('Figures');
-      if (figures) return figures;
-    }
-  }
-  return undefined;
+function resolveDwfWasmUrl(options: CadLoadOptions): string | undefined {
+  if (options.dwfWasmUrl) return options.dwfWasmUrl;
+  if (typeof document === 'undefined') return undefined;
+  const base = options.wasmPath
+    ? new URL(ensureTrailingSlash(options.wasmPath), document.baseURI).href
+    : new URL('wasm/', document.baseURI).href;
+  return new URL('dwfv-render.wasm', base).href;
 }
 
-function parseElementTransform(element: Element): Matrix2D | undefined {
-  return parseMatrix(element.getAttribute('RenderTransform'))
-    ?? parseMatrix(element.getAttribute('Transform'))
-    ?? parseChildMatrix(element, 'RenderTransform')
-    ?? parseChildMatrix(element, 'Canvas.RenderTransform')
-    ?? parseChildMatrix(element, 'Path.RenderTransform')
-    ?? parseChildMatrix(element, 'Glyphs.RenderTransform');
+function resolveDwfBackground(options: CadLoadOptions): string {
+  if (options.dwfBackground) return options.dwfBackground;
+  const canvasOptions = (options as CadLoadOptions & { canvasOptions?: { background?: string } }).canvasOptions;
+  return canvasOptions?.background ?? '#05070d';
 }
 
-function parseChildMatrix(element: Element, tag: string): Matrix2D | undefined {
-  for (const child of Array.from(element.children)) {
-    if (stripNamespace(child.nodeName) !== tag && child.nodeName !== tag) continue;
-    const matrix = child.textContent ? parseMatrix(child.textContent) : undefined;
-    if (matrix) return matrix;
-    for (const nested of Array.from(child.children)) {
-      const candidate = parseMatrix(nested.getAttribute('Matrix') ?? nested.textContent ?? undefined);
-      if (candidate) return candidate;
-    }
-  }
-  return undefined;
+function ensureTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value : `${value}/`;
 }
 
-function numberAttr(element: Element, name: string): number | undefined {
-  const value = element.getAttribute(name);
-  const n = value === null ? NaN : Number(value);
-  return Number.isFinite(n) ? n : undefined;
+function rgbToHex(rgb: [number, number, number]): string {
+  const [r, g, b] = rgb.map((value) => Math.max(0, Math.min(255, Math.round(value * 255))));
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 }
 
-function stripNamespace(name: string): string {
-  return name.includes(':') ? name.split(':').pop() ?? name : name;
+function toHex(value: number): string {
+  return value.toString(16).padStart(2, '0');
 }
 
-function resolvePackagePath(baseFile: string, relative: string): string {
-  if (relative.startsWith('/')) return relative.slice(1);
-  const dir = baseFile.includes('/') ? baseFile.slice(0, baseFile.lastIndexOf('/') + 1) : '';
-  const stack = `${dir}${relative}`.split('/');
-  const out: string[] = [];
-  for (const part of stack) {
-    if (!part || part === '.') continue;
-    if (part === '..') out.pop();
-    else out.push(part);
-  }
-  return out.join('/');
+function countBy(values: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const value of values) out[value] = (out[value] ?? 0) + 1;
+  return out;
 }
 
-function bytesToDataUrl(bytes: Uint8Array, name: string): string {
-  const mime = /\.jpe?g$/i.test(name) ? 'image/jpeg' : /\.webp$/i.test(name) ? 'image/webp' : 'image/png';
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `data:${mime};base64,${btoa(binary)}`;
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values));
 }

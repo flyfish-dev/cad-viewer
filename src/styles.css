@@ -1,3 +1,12 @@
+@import 'dwf-viewer/styles.css';
+
+.cad-viewer-container {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
 .cad-viewer-canvas {
   display: block;
   width: 100%;
@@ -20,4 +29,84 @@
   display: block;
   contain: strict;
   user-select: none;
+}
+
+.cad-viewer-native-host {
+  position: absolute;
+  inset: 0;
+  display: none;
+  z-index: 2;
+  min-width: 0;
+  min-height: 0;
+  background: #05070d;
+}
+
+.cad-viewer-native-host.is-active {
+  display: block;
+}
+
+.cad-viewer-native-host .dwfv-root {
+  height: 100%;
+  min-height: 0;
+  color: #dbeafe;
+  background: #05070d;
+}
+
+.cad-viewer-native-host .dwfv-toolbar {
+  min-height: 34px;
+  padding: 5px 8px;
+  gap: 6px;
+  border-bottom: 1px solid rgba(71, 85, 105, 0.65);
+  background: rgba(15, 23, 42, 0.96);
+  color: #e5e7eb;
+}
+
+.cad-viewer-native-host .dwfv-toolbar button,
+.cad-viewer-native-host .dwfv-toolbar select {
+  height: 24px;
+  border: 1px solid rgba(100, 116, 139, 0.75);
+  border-radius: 6px;
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 12px;
+}
+
+.cad-viewer-native-host .dwfv-toolbar button {
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.cad-viewer-native-host .dwfv-toolbar button:hover,
+.cad-viewer-native-host .dwfv-toolbar select:hover {
+  border-color: #60a5fa;
+  color: #bfdbfe;
+}
+
+.cad-viewer-native-host .dwfv-status {
+  color: #93c5fd;
+  font-size: 12px;
+}
+
+.cad-viewer-native-host .dwfv-workspace {
+  min-height: 0;
+  background: #05070d;
+}
+
+.cad-viewer-native-host .dwfv-stage {
+  background: #05070d;
+}
+
+.cad-viewer-native-host .dwfv-tree {
+  border-right: 1px solid rgba(71, 85, 105, 0.7);
+  background: #0f172a;
+  color: #dbeafe;
+}
+
+.cad-viewer-native-host .dwfv-tree-stats,
+.cad-viewer-native-host .dwfv-tree-meta {
+  color: #94a3b8;
+}
+
+.cad-viewer-native-host .dwfv-warn {
+  color: #fbbf24;
 }

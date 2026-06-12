@@ -38,7 +38,7 @@ export default defineConfig({
 
 function libredwgRuntimePatchPlugin(): Plugin {
   return {
-    name: 'cad-viewer:libredwg-runtime-patch',
+    name: 'lightweight-cad-viewer:libredwg-runtime-patch',
     enforce: 'pre',
     resolveId(source, importer) {
       if (source === '../wasm/libredwg-web.js' && importer?.includes('@mlightcad/libredwg-web/lib/libredwg.js')) {
@@ -63,7 +63,7 @@ function libredwgRuntimePatchPlugin(): Plugin {
 
 function devCompatibilityPlugin(): Plugin {
   return {
-    name: 'cad-viewer:dev-compatibility-routes',
+    name: 'lightweight-cad-viewer:dev-compatibility-routes',
     apply: 'serve',
     configureServer(server) {
       server.middlewares.use((request, response, next) => {

@@ -5,11 +5,13 @@ const projectRoot = path.resolve(__dirname, '..');
 const publicWasm = path.join(projectRoot, 'public', 'wasm');
 const dist = path.join(projectRoot, 'dist');
 const distWasm = path.join(dist, 'wasm');
-const required = path.join(publicWasm, 'libredwg-web.wasm');
+const required = ['libredwg-web.wasm', 'dwfv-render.wasm'].map((entry) => path.join(publicWasm, entry));
 
-if (!fs.existsSync(required)) {
-  console.error('[cad-viewer] Missing public/wasm/libredwg-web.wasm. Run npm run copy:wasm before copying dist assets.');
-  process.exit(1);
+for (const file of required) {
+  if (!fs.existsSync(file)) {
+    console.error(`[cad-viewer] Missing ${file}. Run npm run copy:wasm before copying dist assets.`);
+    process.exit(1);
+  }
 }
 
 fs.mkdirSync(distWasm, { recursive: true });
@@ -31,4 +33,4 @@ fs.writeFileSync(
   'utf8'
 );
 
-console.log('[cad-viewer] Copied LibreDWG runtime assets to dist/wasm and created dist/index.js compatibility entry.');
+console.log('[cad-viewer] Copied LibreDWG and dwf-viewer runtime assets to dist/wasm and created dist/index.js compatibility entry.');

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+
+- Integrated the published `dwf-viewer` package as the native DWF/DWFx/XPS rendering path.
+- Added `CadNativeRenderableLoader` so complex formats can mount a dedicated DOM/WebGL renderer while staying inside the loader registry.
+- Added native DWF options: `dwfWasmUrl`, `dwfPreferWebgl`, `dwfPreferWasm`, `dwfBackground`, `dwfMaxDevicePixelRatio`, `dwfMaxCanvasPixels`, `dwfMaxGpuCacheBytes` and `dwfMaxCachedScenes`.
+- Added runtime asset copying and validation for `dwfv-render.wasm` beside `libredwg-web.wasm`.
+
+### Changed
+
+- Replaced the previous DWFx/XPS subset parser with `dwf-viewer` native rendering for DWF 6+ ZIP packages, WHIP/W2D sheets, W3D/HSF eModel content and DWFx/OPC/XPS pages.
+- DWF/DWFx/XPS loads now use `DwfLoader.mount()` and a dedicated native host; DWG/DXF continue through `CadDocument` + retained WebGL.
+- Package license updated to AGPL-3.0-only due to the integrated DWF renderer.
+
+### Removed
+
+- Removed the old classic-DWF limitation message path.
+- Removed the direct `fflate` dependency from this package.
+
 ## 0.5.3
 
 ### Fixed

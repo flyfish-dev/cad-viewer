@@ -156,6 +156,7 @@ export type CadLoadProgressPhase =
   | 'parse'
   | 'normalize'
   | 'render'
+  | 'native-render'
   | 'done';
 
 export interface CadLoadProgress {
@@ -194,6 +195,23 @@ export interface CadLoadOptions {
   keepRaw?: boolean;
   /** Abort a pending load. For native parsers this terminates and recreates the worker. */
   signal?: AbortSignal;
+
+  /** URL to dwf-viewer's optional 2D raster fallback WASM asset, usually /wasm/dwfv-render.wasm. */
+  dwfWasmUrl?: string;
+  /** Prefer dwf-viewer's WebGL paths for W2D/W3D rendering. */
+  dwfPreferWebgl?: boolean;
+  /** Allow dwf-viewer's WASM raster backend for complex 2D vector pages. */
+  dwfPreferWasm?: boolean;
+  /** Background passed to the native DWF renderer. Defaults to the active CAD canvas background. */
+  dwfBackground?: string;
+  /** DWF renderer device-pixel-ratio cap. */
+  dwfMaxDevicePixelRatio?: number;
+  /** DWF renderer maximum backing-store pixels per canvas. */
+  dwfMaxCanvasPixels?: number;
+  /** DWF WebGL GPU cache budget in bytes. */
+  dwfMaxGpuCacheBytes?: number;
+  /** Number of DWF pages/scenes kept in the native renderer cache. */
+  dwfMaxCachedScenes?: number;
   /** Receives coarse loader progress events. */
   onProgress?: (progress: CadLoadProgress) => void;
 }
@@ -213,6 +231,24 @@ export interface CadLoader {
   readonly formats: readonly CadFormat[];
   accepts(input: CadLoadInput, bytes?: Uint8Array): boolean;
   load(input: CadLoadInput, options?: CadLoadOptions): Promise<CadLoadResult>;
+}
+
+
+
+export interface CadNativeRenderableLoader extends CadLoader {
+  readonly nativeRenderer: true;
+  mount(input: CadLoadInput, host: HTMLElement, options?: CadLoadOptions): Promise<CadLoadResult>;
+  unmount(): void;
+  fit?(): void;
+  zoomIn?(): void;
+  zoomOut?(): void;
+  resize?(): void;
+  setNativeOptions?(options: CadLoadOptions): void;
+}
+
+export function isCadNativeRenderableLoader(loader: CadLoader): loader is CadNativeRenderableLoader {
+  const candidate = loader as Partial<CadNativeRenderableLoader>;
+  return candidate.nativeRenderer === true && typeof candidate.mount === 'function';
 }
 
 export interface CadSummary {

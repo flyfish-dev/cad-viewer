@@ -1,7 +1,7 @@
 {
   "name": "@flyfish-dev/cad-viewer",
-  "version": "0.5.3",
-  "description": "A production-oriented lightweight frontend CAD viewer for DWG, DXF and DWFx/DWF preview, built with TypeScript, WebGL, Canvas overlays and worker-backed DWG WebAssembly parsing.",
+  "version": "0.6.0",
+  "description": "A production-oriented lightweight frontend CAD viewer for DWG, DXF, DWF and DWFx, built with TypeScript, worker-backed DWG WebAssembly parsing, native dwf-viewer integration, WebGL and Canvas overlays.",
   "type": "module",
   "license": "AGPL-3.0-only",
   "author": "Yu Wang",
@@ -29,7 +29,10 @@
     "wasm",
     "webgl",
     "gpu",
-    "cad-viewer"
+    "cad-viewer",
+    "w2d",
+    "w3d",
+    "dwf-viewer"
   ],
   "sideEffects": [
     "*.css",
@@ -53,7 +56,8 @@
     "./wasm/libredwg-web.wasm": "./dist/wasm/libredwg-web.wasm",
     "./wasm/libredwg-web.js": "./dist/wasm/libredwg-web.js",
     "./dist/index.js": "./dist/index.js",
-    "./dist/index.d.ts": "./dist/index.d.ts"
+    "./dist/index.d.ts": "./dist/index.d.ts",
+    "./wasm/dwfv-render.wasm": "./dist/wasm/dwfv-render.wasm"
   },
   "files": [
     "dist",
@@ -80,7 +84,7 @@
     "build": "npm run clean && npm run typecheck && npm run build:lib && npm run build:demo",
     "preview": "npm run build:demo && vite preview --config vite.config.ts --host 0.0.0.0",
     "pack:dry": "npm pack --dry-run",
-    "release:npm": "npm publish --access public",
+    "release:npm": "npm publish --access public --auth-type=web",
     "pages:dev": "npm run build:demo && wrangler pages dev dist-demo",
     "deploy:pages": "npm run build:demo && wrangler pages deploy dist-demo --project-name cad-viewer",
     "prepublishOnly": "npm run clean && npm run typecheck && npm run build:lib && npm run pack:dry",
@@ -92,7 +96,7 @@
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.2",
     "dxf-parser": "^1.1.2",
-    "fflate": "^0.8.2"
+    "dwf-viewer": "^0.5.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.12",

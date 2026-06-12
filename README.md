@@ -8,10 +8,21 @@ A professional, lightweight, extensible **frontend CAD viewer** for modern brows
 **Live demo:** [cad-viewer-iys.pages.dev](https://cad-viewer-iys.pages.dev)  
 **Source:** [github.com/flyfish-dev/cad-viewer](https://github.com/flyfish-dev/cad-viewer)
 
-The project provides a clean loader architecture for **DWG**, **DXF** and **DWFx/XPS-compatible DWF preview**, normalizes format-specific data into a common `CadDocument`, and renders it through a retained WebGL pipeline with a lightweight Canvas overlay for text and images. Files are read locally in the browser; the viewer does not upload drawings to a backend.
+The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, **DWFx** and **XPS**. DWG/DXF are normalized into a common `CadDocument` and rendered through retained WebGL with a lightweight Canvas overlay; DWF/DWFx/XPS are delegated to the native `dwf-viewer` renderer for W2D, W3D/HSF eModel and XPS page content. Files are read locally in the browser; the viewer does not upload drawings to a backend.
 
-> DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly. DXF support uses JavaScript parsing plus a built-in fallback parser. DWFx support parses XPS `FixedPage` vector pages. Classic `.dwf` WHIP/W2D/W3D streams are detected and reported clearly, but full classic DWF decoding still requires a dedicated WHIP decoder or DWF Toolkit/WASM implementation.
+> DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer`, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages and an optional raster WASM fallback.
 
+
+## What changed in 0.6.0
+
+- Replaced the previous DWFx/XPS subset parser with the published `dwf-viewer` native renderer.
+- DWF/DWFx/XPS files now mount a dedicated native viewer path instead of being forced into the DWG/DXF `CadDocument` renderer.
+- Added support for DWF 6+ ZIP packages, WHIP/W2D 2D sheets, W3D/HSF 3D eModel pages, DWFx/OPC/XPS pages and dwf-viewer's WebGL/WASM render backends.
+- Added `CadNativeRenderableLoader`, allowing loaders to mount an optimized DOM/WebGL viewer when a format needs more than the normalized 2D scene model.
+- Added `dwfWasmUrl`, `dwfPreferWebgl`, `dwfPreferWasm`, `dwfMaxCanvasPixels`, `dwfMaxGpuCacheBytes` and related production options.
+- Runtime asset scripts now copy and validate both `libredwg-web.wasm` and `dwfv-render.wasm`.
+- Removed the old classic-DWF warning path and the `fflate` dependency from this package.
+- Updated package licensing to AGPL-3.0-only to match the integrated DWF renderer.
 
 ## What changed in 0.5.3
 
@@ -49,10 +60,10 @@ The project provides a clean loader architecture for **DWG**, **DXF** and **DWFx
 ## Features
 
 - **Pure frontend viewer component**: `new CadViewer({ container })` or `new CadViewer({ canvas })`.
-- **Loader registry**: DWG, DXF and DWF loaders are independent and replaceable.
+- **Loader registry**: DWG, DXF and DWF loaders are independent and replaceable; native-renderable loaders can mount their own optimized viewer.
 - **DWG preview**: browser-local parsing through LibreDWG WebAssembly, executed in a Web Worker by default.
 - **DXF preview**: JavaScript parser path with fallback support for common ASCII DXF `ENTITIES`.
-- **DWF/DWFx preview**: DWFx/XPS 2D `FixedPage` rendering for paths, glyphs and images.
+- **DWF/DWFx/XPS preview**: powered by `dwf-viewer` for DWF ZIP packages, W2D 2D sheets, W3D/HSF eModel geometry, DWFx/OPC/XPS pages and raster fallback.
 - **CAD color handling**: ACI, BYLAYER, BYBLOCK inheritance, DWG layer colors, true color, fill color, opacity and adaptive contrast.
 - **High-performance WebGL viewport controls**: retained GPU buffers, spatial culling, zoom, pan, fit-to-view, cursor world coordinates and zoom percentage.
 - **Professional demo UI**: drag-and-drop, compact toolbar, status strip, parse/render timing, entity summary and warnings.
@@ -71,16 +82,16 @@ npm install
 npm run dev
 ```
 
-The DWG loader needs LibreDWG WASM assets in a public directory. This repository copies and validates them for the demo:
+The DWG and DWF render paths need runtime WASM assets in a public directory. This repository copies and validates them for the demo:
 
 ```bash
 npm run copy:wasm
 npm run check:wasm
 ```
 
-The demo resolves `wasmPath` to an absolute URL before sending it to the worker. In your own app, prefer an absolute path or URL, for example `/wasm` or `new URL('wasm/', document.baseURI).href`. Avoid passing a worker-relative path such as `./wasm` unless it is resolved on the UI thread first.
+The demo resolves `wasmPath` to an absolute URL before sending it to the DWG worker and uses the same directory for `dwfv-render.wasm`. In your own app, prefer an absolute path or URL, for example `/wasm` or `new URL('wasm/', document.baseURI).href`. Avoid passing a worker-relative path such as `./wasm` unless it is resolved on the UI thread first.
 
-When publishing the npm package, `build:lib` also copies these files into `dist/wasm` and exposes them as package subpaths. Applications still need to serve the `.wasm` from a public URL and pass that directory as `wasmPath`.
+When publishing the npm package, `build:lib` copies these files into `dist/wasm` and exposes them as package subpaths. Applications still need to serve the `.wasm` files from a public URL and pass that directory as `wasmPath`, or pass `dwfWasmUrl` explicitly.
 
 
 ## Demo startup notes
@@ -110,6 +121,7 @@ const viewer = new CadViewer({
   container: document.querySelector('#viewer')!,
   renderer: 'auto',       // WebGL first, Canvas2D fallback
   wasmPath: new URL('wasm/', document.baseURI).href,
+  dwfWasmUrl: new URL('wasm/dwfv-render.wasm', document.baseURI).href,
   canvasOptions: {
     background: '#05070d',
     foreground: '#f8fafc',
@@ -177,6 +189,7 @@ const controller = new AbortController();
 const viewer = new CadViewer({
   container,
   wasmPath: new URL('wasm/', document.baseURI).href,
+  dwfWasmUrl: new URL('wasm/dwfv-render.wasm', document.baseURI).href,
   useWorker: true,
   workerTimeoutMs: 120_000,
   onLoadProgress(progress) {
@@ -197,6 +210,7 @@ Advanced deployments can override the worker constructor when the bundler or CDN
 new CadViewer({
   container,
   wasmPath: new URL('wasm/', document.baseURI).href,
+  dwfWasmUrl: new URL('wasm/dwfv-render.wasm', document.baseURI).href,
   workerUrl: new URL('/assets/dwg-worker.js', window.location.origin)
 });
 ```
@@ -210,7 +224,8 @@ const viewer = new CadViewer({
   container,             // HTMLElement; creates a canvas inside
   canvas,                // optional existing HTMLCanvasElement
   renderer: 'auto',      // 'auto' | 'webgl' | 'canvas2d'
-  wasmPath: '/wasm',     // LibreDWG WebAssembly asset path. Absolute URL/path recommended for workers
+  wasmPath: '/wasm',     // directory containing libredwg-web.wasm and dwfv-render.wasm
+  dwfWasmUrl: '/wasm/dwfv-render.wasm',
   autoFit: true,
   canvasOptions: {
     background: '#05070d',
@@ -229,6 +244,9 @@ const viewer = new CadViewer({
   },
   useWorker: true,                 // default for DWG
   workerTimeoutMs: 0,              // 0 = disabled
+  dwfPreferWebgl: true,
+  dwfPreferWasm: true,
+  dwfMaxCanvasPixels: 16_777_216,
   onLoadProgress(progress) {},
   onLoad(result) {},
   onError(error) {},
@@ -256,11 +274,8 @@ CadLoaderRegistry
   ↓
 DwgLoader | DxfLoader | DwfLoader | custom loader
   ↓
-CadDocument
-  ↓
-CadWebGLRenderer | CadCanvasRenderer fallback
-  ↓
-WebGL preview + Canvas overlay
+DWG/DXF: CadDocument → CadWebGLRenderer | CadCanvasRenderer fallback
+DWF/DWFx/XPS: DwfLoader.mount() → dwf-viewer native WebGL/WASM renderer
 ```
 
 Each loader returns a normalized `CadDocument`:
@@ -312,8 +327,8 @@ viewer.registerLoader({
 |---|---|---|
 | DWG | `DwgLoader` | Uses LibreDWG WebAssembly. Rendering coverage depends on the entities exposed by LibreDWG conversion. |
 | DXF | `DxfLoader` | Uses `dxf-parser` plus fallback parsing. Supports core entities, blocks/inserts, colors/layers, polylines, text, hatch boundaries and splines as preview polylines. |
-| DWFx / XPS | `DwfLoader` | Parses ZIP/OPC packages and renders 2D `FixedPage` path/glyph/image content. |
-| Classic DWF | `DwfLoader` detection | Detects WHIP/W2D/W3D package content and returns a clear unsupported error. Full classic DWF requires a dedicated WHIP decoder or DWF Toolkit/WASM. |
+| DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP packages, WHIP/W2D 2D sheets, W3D/HSF 3D eModel pages, model tree metadata and WebGL/WASM rendering. |
+| DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS pages with vector paths, text, images and package resources through the native DWF renderer. |
 
 ## Color handling
 
@@ -357,7 +372,7 @@ npm run pack:dry
 
 ```bash
 npm login
-npm publish --access public
+npm publish --access public --auth-type=web
 ```
 
 The package also exposes:
@@ -400,12 +415,10 @@ src/
   viewer/        CadViewer component and Canvas renderer
 demo/            professional Vite demo UI
 docs/            English and Chinese architecture / format notes
-scripts/         clean and LibreDWG WASM copy helpers
+scripts/         clean and runtime WASM copy/validation helpers
 public/wasm/     demo WASM asset output directory
 ```
 
 ## License
 
-AGPL-3.0-only. This is a strict copyleft license: if you distribute modified versions or offer modified versions over a network, review your source-code disclosure obligations carefully.
-
-The default DWG loader depends on `@mlightcad/libredwg-web`, which is GPL-3.0-only. For closed-source commercial use, replace the DWG loader with a properly licensed parser/converter and review all dependency licenses.
+AGPL-3.0-only. The default DWG loader integrates `@mlightcad/libredwg-web` / LibreDWG, and the DWF renderer integrates `dwf-viewer`. Keep attribution and license notices when redistributing, modifying, embedding or using this package as part of another application. For closed-source commercial products, review all dependency licenses and replace loaders where your licensing model requires it.

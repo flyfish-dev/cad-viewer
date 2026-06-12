@@ -50,8 +50,8 @@ host.innerHTML = `
       <section id="drop-zone" class="canvas-card" aria-label="CAD canvas drop zone">
         <canvas id="cad-canvas" aria-label="CAD preview canvas"></canvas>
         <div id="empty-hint" class="empty-hint">
-          <strong>Drop or open DWG / DXF / DWFx</strong>
-          <span>Local parsing, WebGL rendering, worker-backed DWG, wheel to zoom, drag to pan.</span>
+          <strong>Drop or open DWG / DXF / DWF / DWFx</strong>
+          <span>Local parsing, WebGL rendering, worker-backed DWG and native DWF/W2D/W3D preview.</span>
         </div>
         <div id="load-overlay" class="load-overlay is-hidden" aria-live="polite">
           <div class="load-card">
@@ -342,6 +342,7 @@ function progressPercentFromPhase(phase: CadLoadProgress['phase']): number {
     case 'parse': return 55;
     case 'normalize': return 78;
     case 'render': return 94;
+    case 'native-render': return 32;
     case 'done': return 100;
     default: return 8;
   }
