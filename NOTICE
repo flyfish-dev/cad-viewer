@@ -4,6 +4,6 @@ This project integrates third-party open-source projects for CAD parsing and ren
 
 - @mlightcad/libredwg-web: DWG parsing in the browser through LibreDWG WebAssembly. License: GPL-3.0-only.
 - dxf-parser: DXF parser for JavaScript. License: MIT.
-- dwf-viewer: native frontend DWF/DWFx renderer for DWF 6+ ZIP containers, DWFx/OPC/XPS, WHIP/W2D 2D sheets and W3D/HSF eModel content. License: AGPL-3.0-only.
+- dwf-viewer 0.6.x: native frontend DWF/DWFx/XPS renderer for DWF 6+ ZIP containers, DWFx/OPC/XPS, WHIP/W2D 2D sheets, W3D/HSF eModel content, embedded XPS fonts and optional WASM fallback. License: AGPL-3.0-only.
 
 The combined package is distributed under AGPL-3.0-only. Keep attribution and license notices when redistributing, modifying, embedding, or using this package as part of another application.

@@ -29,8 +29,8 @@ DWF, DWFx and XPS are handled by `DwfLoader` through the published `dwf-viewer` 
 Covered render paths include:
 
 - DWF 6+ ZIP container packages.
-- WHIP/W2D 2D sheets with WebGL rendering and optional WASM raster fallback.
+- WHIP/W2D 2D sheets with WebGL rendering, adaptive CAD line weights and optional WASM raster fallback.
 - W3D/HSF 3D eModel shell geometry with model tree and material metadata.
-- DWFx / OPC / XPS `FixedPage` pages with vector, text and image resources.
+- DWFx / OPC / XPS `FixedPage` pages with WebGL-accelerated vector geometry, embedded XPS fonts where browser `FontFace` loading is available, text and image resources.
 
-`CadViewer` detects the native DWF loader and mounts it into a `nativeHost`; DWG/DXF continue to use the normalized `CadDocument` + retained WebGL renderer. Serve `dwfv-render.wasm` beside `libredwg-web.wasm` under `/wasm`, or pass `dwfWasmUrl` explicitly.
+`CadViewer` detects the native DWF loader and mounts it into a `nativeHost`; DWG/DXF continue to use the normalized `CadDocument` + retained WebGL renderer. Serve `dwfv-render.wasm` beside `libredwg-web.wasm` under `/wasm`, or pass `dwfWasmUrl` explicitly. DWF/XPS overview rendering can be tuned with the `dwfLineWeightMode`, `dwfMinStrokeCssPx`, `dwfMaxOverviewStrokeCssPx`, `dwfMinTextCssPx` and `dwfMinFilledAreaCssPx` load options.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1
+
+### Added
+
+- Exposed `dwfLineWeightMode`, `dwfMinStrokeCssPx`, `dwfMaxOverviewStrokeCssPx`, `dwfMinTextCssPx` and `dwfMinFilledAreaCssPx` so applications can tune `dwf-viewer` 0.6.x CAD overview rendering from `CadViewer` options.
+
+### Changed
+
+- Updated `dwf-viewer` to 0.6.1.
+- Aligned package metadata, README and docs with the current DWF path: WebGL-accelerated XPS/DWFx and W2D 2D vector rendering, W3D/HSF 3D rendering, embedded XPS fonts, adaptive line weights and optional WASM raster fallback.
+
 ## 0.6.0
 
 ### Added

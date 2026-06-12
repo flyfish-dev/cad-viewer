@@ -8,10 +8,16 @@ A professional, lightweight, extensible **frontend CAD viewer** for modern brows
 **Live demo:** [cad-viewer-iys.pages.dev](https://cad-viewer-iys.pages.dev)  
 **Source:** [github.com/flyfish-dev/cad-viewer](https://github.com/flyfish-dev/cad-viewer)
 
-The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, **DWFx** and **XPS**. DWG/DXF are normalized into a common `CadDocument` and rendered through retained WebGL with a lightweight Canvas overlay; DWF/DWFx/XPS are delegated to the native `dwf-viewer` renderer for W2D, W3D/HSF eModel and XPS page content. Files are read locally in the browser; the viewer does not upload drawings to a backend.
+The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, **DWFx** and **XPS**. DWG/DXF are normalized into a common `CadDocument` and rendered through retained WebGL with a lightweight Canvas overlay; DWF/DWFx/XPS are delegated to the native `dwf-viewer` renderer for WebGL-accelerated W2D and XPS/DWFx vectors, W3D/HSF eModel geometry, embedded XPS fonts and optional WASM fallback. Files are read locally in the browser; the viewer does not upload drawings to a backend.
 
-> DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer`, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages and an optional raster WASM fallback.
+> DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.6.1
+
+- Updated the native DWF path to `dwf-viewer` 0.6.1.
+- Adopted the current renderer behavior for WebGL-accelerated XPS/DWFx and W2D 2D vector rendering, W3D/HSF 3D rendering, embedded XPS font loading and optional WASM raster fallback.
+- Exposed DWF/XPS overview tuning through `dwfLineWeightMode`, `dwfMinStrokeCssPx`, `dwfMaxOverviewStrokeCssPx`, `dwfMinTextCssPx` and `dwfMinFilledAreaCssPx`.
+- Refreshed README, format notes, architecture notes and package metadata for the latest DWF support.
 
 ## What changed in 0.6.0
 
@@ -63,7 +69,7 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 - **Loader registry**: DWG, DXF and DWF loaders are independent and replaceable; native-renderable loaders can mount their own optimized viewer.
 - **DWG preview**: browser-local parsing through LibreDWG WebAssembly, executed in a Web Worker by default.
 - **DXF preview**: JavaScript parser path with fallback support for common ASCII DXF `ENTITIES`.
-- **DWF/DWFx/XPS preview**: powered by `dwf-viewer` for DWF ZIP packages, W2D 2D sheets, W3D/HSF eModel geometry, DWFx/OPC/XPS pages and raster fallback.
+- **DWF/DWFx/XPS preview**: powered by `dwf-viewer` for DWF ZIP packages, WebGL-accelerated W2D and XPS/DWFx 2D vectors, W3D/HSF eModel geometry, embedded XPS fonts, adaptive CAD line weights and raster fallback.
 - **CAD color handling**: ACI, BYLAYER, BYBLOCK inheritance, DWG layer colors, true color, fill color, opacity and adaptive contrast.
 - **High-performance WebGL viewport controls**: retained GPU buffers, spatial culling, zoom, pan, fit-to-view, cursor world coordinates and zoom percentage.
 - **Professional demo UI**: drag-and-drop, compact toolbar, status strip, parse/render timing, entity summary and warnings.
@@ -247,6 +253,9 @@ const viewer = new CadViewer({
   dwfPreferWebgl: true,
   dwfPreferWasm: true,
   dwfMaxCanvasPixels: 16_777_216,
+  dwfLineWeightMode: 'adaptive',  // 'adaptive' | 'physical' | 'hairline'
+  dwfMinStrokeCssPx: 0.42,
+  dwfMinTextCssPx: 1.05,
   onLoadProgress(progress) {},
   onLoad(result) {},
   onError(error) {},
@@ -275,7 +284,7 @@ CadLoaderRegistry
 DwgLoader | DxfLoader | DwfLoader | custom loader
   ↓
 DWG/DXF: CadDocument → CadWebGLRenderer | CadCanvasRenderer fallback
-DWF/DWFx/XPS: DwfLoader.mount() → dwf-viewer native WebGL/WASM renderer
+DWF/DWFx/XPS: DwfLoader.mount() → dwf-viewer native WebGL vectors / 3D / WASM fallback
 ```
 
 Each loader returns a normalized `CadDocument`:
@@ -327,8 +336,8 @@ viewer.registerLoader({
 |---|---|---|
 | DWG | `DwgLoader` | Uses LibreDWG WebAssembly. Rendering coverage depends on the entities exposed by LibreDWG conversion. |
 | DXF | `DxfLoader` | Uses `dxf-parser` plus fallback parsing. Supports core entities, blocks/inserts, colors/layers, polylines, text, hatch boundaries and splines as preview polylines. |
-| DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP packages, WHIP/W2D 2D sheets, W3D/HSF 3D eModel pages, model tree metadata and WebGL/WASM rendering. |
-| DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS pages with vector paths, text, images and package resources through the native DWF renderer. |
+| DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP packages, WHIP/W2D 2D sheets, W3D/HSF 3D eModel pages, model tree metadata, WebGL rendering and optional WASM fallback. |
+| DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS pages with WebGL-accelerated vector paths, embedded fonts, text, images, package resources and adaptive overview line weights through the native DWF renderer. |
 
 ## Color handling
 

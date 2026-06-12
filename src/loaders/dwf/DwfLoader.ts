@@ -1,4 +1,4 @@
-import { DwfViewer, openDwfDocument, type LoadedDwfDocument, type PageData, type RenderStats as DwfRenderStats, type W2dPrimitive } from 'dwf-viewer';
+import { DwfViewer, openDwfDocument, type DwfViewerOptions, type LoadedDwfDocument, type LoadOptions as DwfLoadOptions, type PageData, type RenderStats as DwfRenderStats, type W2dPrimitive } from 'dwf-viewer';
 import { createCadDocument, flattenPages } from '../../core/entity';
 import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
 import type { CadDocument, CadEntity, CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadNativeRenderableLoader, CadPage, CadPathCommand, CadPoint3D } from '../../core/types';
@@ -49,31 +49,19 @@ export class DwfLoader implements CadNativeRenderableLoader {
     const format = normalizeFormat(detectCadFormat(input, bytes), extensionOf(input));
     const wasmUrl = resolveDwfWasmUrl(merged);
     const background = resolveDwfBackground(merged);
+    const viewerOptions = buildDwfViewerOptions(merged, wasmUrl, background);
+    const loadOptions = buildDwfLoadOptions(merged, wasmUrl, background);
 
     merged.onProgress?.({ phase: 'native-render', format, message: 'Mounting native DWF renderer…', percent: 28 });
     this.unmount();
     this.host = host;
     host.replaceChildren();
-    this.native = new DwfViewer(host, {
-      wasmUrl,
-      preferWebgl: merged.dwfPreferWebgl ?? true,
-      preferWasm: merged.dwfPreferWasm ?? true,
-      background,
-      maxDevicePixelRatio: merged.dwfMaxDevicePixelRatio ?? 2,
-      maxCanvasPixels: merged.dwfMaxCanvasPixels ?? 16_777_216,
-      maxGpuCacheBytes: merged.dwfMaxGpuCacheBytes ?? 160 * 1024 * 1024,
-      maxCachedScenes: merged.dwfMaxCachedScenes ?? 2
-    });
+    this.native = new DwfViewer(host, viewerOptions);
 
     merged.onProgress?.({ phase: 'parse', format, message: 'Parsing DWF package and page streams…', percent: 58 });
     await this.native.load(bytes, {
       fileName: sourceName,
-      wasmUrl,
-      preferWebgl: merged.dwfPreferWebgl ?? true,
-      preferWasm: merged.dwfPreferWasm ?? true,
-      background,
-      maxGpuCacheBytes: merged.dwfMaxGpuCacheBytes ?? 160 * 1024 * 1024,
-      maxCachedScenes: merged.dwfMaxCachedScenes ?? 2
+      ...loadOptions
     });
 
     merged.onProgress?.({ phase: 'render', format, message: 'Rendering DWF/DWFx with dwf-viewer…', percent: 88 });
@@ -114,7 +102,17 @@ export class DwfLoader implements CadNativeRenderableLoader {
   }
 
   setNativeOptions(options: CadLoadOptions): void {
-    const native = this.native as unknown as { background?: string; setPreferWebgl?: (value: boolean) => void; setPreferWasm?: (value: boolean) => void; render?: () => Promise<unknown> } | undefined;
+    const native = this.native as unknown as {
+      background?: string;
+      setPreferWebgl?: (value: boolean) => void;
+      setPreferWasm?: (value: boolean) => void;
+      setLineWeightMode?: (value: NonNullable<CadLoadOptions['dwfLineWeightMode']>) => void;
+      minStrokeCssPx?: number;
+      maxOverviewStrokeCssPx?: number;
+      minTextCssPx?: number;
+      minFilledAreaCssPx?: number;
+      render?: () => Promise<unknown>;
+    } | undefined;
     if (!native) return;
     if (typeof options.dwfBackground === 'string') native.background = options.dwfBackground;
     else {
@@ -123,6 +121,11 @@ export class DwfLoader implements CadNativeRenderableLoader {
     }
     if (typeof options.dwfPreferWebgl === 'boolean') native.setPreferWebgl?.(options.dwfPreferWebgl);
     if (typeof options.dwfPreferWasm === 'boolean') native.setPreferWasm?.(options.dwfPreferWasm);
+    if (options.dwfLineWeightMode) native.setLineWeightMode?.(options.dwfLineWeightMode);
+    setOptionalNumber(native, 'minStrokeCssPx', options.dwfMinStrokeCssPx);
+    setOptionalNumber(native, 'maxOverviewStrokeCssPx', options.dwfMaxOverviewStrokeCssPx);
+    setOptionalNumber(native, 'minTextCssPx', options.dwfMinTextCssPx);
+    setOptionalNumber(native, 'minFilledAreaCssPx', options.dwfMinFilledAreaCssPx);
     void native.render?.();
   }
 
@@ -273,6 +276,34 @@ function resolveDwfBackground(options: CadLoadOptions): string {
   if (options.dwfBackground) return options.dwfBackground;
   const canvasOptions = (options as CadLoadOptions & { canvasOptions?: { background?: string } }).canvasOptions;
   return canvasOptions?.background ?? '#05070d';
+}
+
+function buildDwfViewerOptions(options: CadLoadOptions, wasmUrl: string | undefined, background: string): DwfViewerOptions {
+  return {
+    ...buildDwfLoadOptions(options, wasmUrl, background),
+    maxDevicePixelRatio: options.dwfMaxDevicePixelRatio ?? 2,
+    maxCanvasPixels: options.dwfMaxCanvasPixels ?? 16_777_216
+  };
+}
+
+function buildDwfLoadOptions(options: CadLoadOptions, wasmUrl: string | undefined, background: string): DwfLoadOptions {
+  return {
+    wasmUrl,
+    preferWebgl: options.dwfPreferWebgl ?? true,
+    preferWasm: options.dwfPreferWasm ?? true,
+    background,
+    maxGpuCacheBytes: options.dwfMaxGpuCacheBytes ?? 160 * 1024 * 1024,
+    maxCachedScenes: options.dwfMaxCachedScenes ?? 2,
+    lineWeightMode: options.dwfLineWeightMode ?? 'adaptive',
+    minStrokeCssPx: options.dwfMinStrokeCssPx,
+    maxOverviewStrokeCssPx: options.dwfMaxOverviewStrokeCssPx,
+    minTextCssPx: options.dwfMinTextCssPx,
+    minFilledAreaCssPx: options.dwfMinFilledAreaCssPx
+  };
+}
+
+function setOptionalNumber<T extends object, K extends keyof T>(target: T, key: K, value: number | undefined): void {
+  if (typeof value === 'number' && Number.isFinite(value)) target[key] = value as T[K];
 }
 
 function ensureTrailingSlash(value: string): string {

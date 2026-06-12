@@ -1,4 +1,5 @@
 export type CadFormat = 'dwg' | 'dxf' | 'dwf' | 'dwfx' | 'xps' | 'unknown';
+export type CadDwfLineWeightMode = 'adaptive' | 'physical' | 'hairline';
 
 export interface CadPoint2D {
   x: number;
@@ -212,6 +213,16 @@ export interface CadLoadOptions {
   dwfMaxGpuCacheBytes?: number;
   /** Number of DWF pages/scenes kept in the native renderer cache. */
   dwfMaxCachedScenes?: number;
+  /** DWF/XPS CAD line-weight rendering mode. Defaults to dwf-viewer's adaptive mode. */
+  dwfLineWeightMode?: CadDwfLineWeightMode;
+  /** Minimum CSS-pixel stroke used by the DWF/XPS adaptive line-weight renderer. */
+  dwfMinStrokeCssPx?: number;
+  /** Maximum overview stroke width before zoom restores physical line weights. */
+  dwfMaxOverviewStrokeCssPx?: number;
+  /** Minimum CSS-pixel text size shown in dense adaptive DWF/XPS overviews. */
+  dwfMinTextCssPx?: number;
+  /** Minimum filled area, in CSS pixels, shown in dense adaptive DWF/XPS overviews. */
+  dwfMinFilledAreaCssPx?: number;
   /** Receives coarse loader progress events. */
   onProgress?: (progress: CadLoadProgress) => void;
 }

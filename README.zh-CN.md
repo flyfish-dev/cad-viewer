@@ -8,10 +8,16 @@
 **在线 Demo：** [cad-viewer-iys.pages.dev](https://cad-viewer-iys.pages.dev)  
 **源码仓库：** [github.com/flyfish-dev/cad-viewer](https://github.com/flyfish-dev/cad-viewer)
 
-本仓库提供面向浏览器的 loader 架构，支持 **DWG**、**DXF**、**DWF**、**DWFx** 和 **XPS**。DWG/DXF 会归一化为统一 `CadDocument` 并通过 WebGL retained-mode 渲染，文字/图片使用轻量 Canvas overlay；DWF/DWFx/XPS 交给原生 `dwf-viewer` 渲染通道处理 W2D、W3D/HSF eModel 和 XPS 页面内容。文件在浏览器本地读取，组件不会把图纸上传到服务端。
+本仓库提供面向浏览器的 loader 架构，支持 **DWG**、**DXF**、**DWF**、**DWFx** 和 **XPS**。DWG/DXF 会归一化为统一 `CadDocument` 并通过 WebGL retained-mode 渲染，文字/图片使用轻量 Canvas overlay；DWF/DWFx/XPS 交给原生 `dwf-viewer` 渲染通道处理 WebGL 加速的 W2D 与 XPS/DWFx 矢量、W3D/HSF eModel、XPS 嵌入字体和可选 WASM fallback。文件在浏览器本地读取，组件不会把图纸上传到服务端。
 
-> DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面和可选 raster WASM fallback。
+> DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.6.1 变更
+
+- 原生 DWF 通道升级到 `dwf-viewer` 0.6.1。
+- 同步最新 renderer 行为：WebGL 加速 XPS/DWFx 与 W2D 2D 矢量渲染、W3D/HSF 3D 渲染、XPS 嵌入字体加载和可选 WASM raster fallback。
+- 新增 `dwfLineWeightMode`、`dwfMinStrokeCssPx`、`dwfMaxOverviewStrokeCssPx`、`dwfMinTextCssPx`、`dwfMinFilledAreaCssPx`，用于调节 DWF/XPS 总览渲染效果。
+- 更新 README、格式说明、架构说明和 package metadata，统一最新版 DWF 支持口径。
 
 ## 0.6.0 变更
 
@@ -63,7 +69,7 @@
 - **正确的 loader 架构**：DWG / DXF / DWF 独立 loader，可替换、可扩展；native-renderable loader 可以挂载自己的优化渲染器。
 - **DWG 预览**：通过 LibreDWG WebAssembly 在浏览器本地解析，默认在 Web Worker 中执行。
 - **DXF 预览**：JavaScript 解析，支持常见 ASCII DXF `ENTITIES`，并带 fallback parser。
-- **DWF/DWFx/XPS 预览**：由 `dwf-viewer` 支持 DWF ZIP 包、W2D 2D 图纸、W3D/HSF eModel、DWFx/OPC/XPS 页面和 raster fallback。
+- **DWF/DWFx/XPS 预览**：由 `dwf-viewer` 支持 DWF ZIP 包、WebGL 加速 W2D 与 XPS/DWFx 2D 矢量、W3D/HSF eModel、XPS 嵌入字体、自适应 CAD 线宽和 raster fallback。
 - **CAD 颜色处理**：支持 ACI、BYLAYER、BYBLOCK 继承、DWG 图层颜色、true color、填充色、透明度和自适应对比度。
 - **WebGL 高性能交互**：GPU retained buffers、空间分桶、视口裁剪、缩放、平移、适配窗口、世界坐标、缩放百分比。
 - **专业 Demo**：拖拽打开、紧凑工具栏、状态条、解析/渲染耗时、实体类型统计、warnings 展示。
@@ -225,6 +231,7 @@ const viewer = new CadViewer({
   canvas,                // 也可以传入已有 canvas
   renderer: 'auto',      // 'auto' | 'webgl' | 'canvas2d'
   wasmPath: '/wasm',     // LibreDWG WebAssembly 资源路径。Worker 场景建议使用绝对路径/URL
+  dwfWasmUrl: '/wasm/dwfv-render.wasm',
   autoFit: true,
   canvasOptions: {
     background: '#05070d',
@@ -243,6 +250,12 @@ const viewer = new CadViewer({
   },
   useWorker: true,                 // DWG 默认开启
   workerTimeoutMs: 0,              // 0 表示不限制
+  dwfPreferWebgl: true,
+  dwfPreferWasm: true,
+  dwfMaxCanvasPixels: 16_777_216,
+  dwfLineWeightMode: 'adaptive',  // 'adaptive' | 'physical' | 'hairline'
+  dwfMinStrokeCssPx: 0.42,
+  dwfMinTextCssPx: 1.05,
   onLoadProgress(progress) {},
   onLoad(result) {},
   onError(error) {},
@@ -271,7 +284,7 @@ CadLoaderRegistry
 DwgLoader | DxfLoader | DwfLoader | 自定义 loader
   ↓
 DWG/DXF：CadDocument → CadWebGLRenderer | CadCanvasRenderer fallback
-DWF/DWFx/XPS：DwfLoader.mount() → dwf-viewer native WebGL/WASM renderer
+DWF/DWFx/XPS：DwfLoader.mount() → dwf-viewer native WebGL 矢量 / 3D / WASM fallback
 ```
 
 所有 loader 都输出统一的 `CadDocument`：
@@ -323,8 +336,8 @@ viewer.registerLoader({
 |---|---|---|
 | DWG | `DwgLoader` | 使用 LibreDWG WebAssembly。渲染完整度取决于 LibreDWG converter 暴露出的实体。 |
 | DXF | `DxfLoader` | 使用 `dxf-parser` + 内置 fallback。支持基础实体、block/insert、颜色/图层、多段线、文字、hatch boundary、spline 预览。 |
-| DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、模型树元数据以及 WebGL/WASM 渲染。 |
-| DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS 页面，包含 vector path、文本、图片和包内资源，通过原生 DWF 渲染器展示。 |
+| DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、模型树元数据、WebGL 渲染和可选 WASM fallback。 |
+| DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS 页面，包含 WebGL 加速 vector path、嵌入字体、文本、图片、包内资源和自适应总览线宽，通过原生 DWF 渲染器展示。 |
 
 ## 颜色处理
 

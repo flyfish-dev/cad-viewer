@@ -21,7 +21,7 @@ DXF: DxfLoader.load() → CadDocument
 DWF/DWFx/XPS: DwfLoader.mount() → dwf-viewer native renderer
   ↓
 DWG/DXF: retained WebGL batches + Canvas overlay
-DWF/DWFx/XPS: W2D/W3D/XPS WebGL/WASM renderer
+DWF/DWFx/XPS: W2D/XPS WebGL vectors + W3D/HSF 3D + Canvas text/image overlay + optional WASM fallback
 ```
 
 ## Key modules
@@ -99,12 +99,12 @@ main thread
   DwfLoader.mount(input, nativeHost)
       ↓
   dwf-viewer parses DWF package/page streams
-  WebGL/WASM renderer draws W2D, W3D/HSF or XPS content
+  WebGL draws W2D and XPS/DWFx vectors; Canvas overlays text/images; WASM fallback is available for complex 2D pages
       ↓
   CadViewer still exposes summary, metadata and lifecycle controls
 ```
 
-`DwfLoader.load()` remains available for programmatic metadata reads. `CadViewer` uses `mount()` when a loader implements `CadNativeRenderableLoader`. This keeps native format renderers isolated without weakening the loader registry contract.
+`DwfLoader.load()` remains available for programmatic metadata reads. `CadViewer` uses `mount()` when a loader implements `CadNativeRenderableLoader`. This keeps native format renderers isolated without weakening the loader registry contract. The DWF path passes through `dwf-viewer` controls for WebGL/WASM preference, cache budgets, adaptive line weights and dense-overview text/fill thresholds.
 
 ## Loader contract
 

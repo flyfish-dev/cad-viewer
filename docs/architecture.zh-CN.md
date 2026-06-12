@@ -21,7 +21,7 @@ DXF：DxfLoader.load() → CadDocument
 DWF/DWFx/XPS：DwfLoader.mount() → dwf-viewer native renderer
   ↓
 DWG/DXF：retained WebGL batches + Canvas overlay
-DWF/DWFx/XPS：W2D/W3D/XPS WebGL/WASM renderer
+DWF/DWFx/XPS：W2D/XPS WebGL 矢量 + W3D/HSF 3D + Canvas 文字/图片 overlay + 可选 WASM fallback
 ```
 
 ## 核心模块
@@ -99,12 +99,12 @@ DWF、DWFx 和 XPS 使用 native-renderable loader，因为 W2D、W3D/HSF eModel
   DwfLoader.mount(input, nativeHost)
       ↓
   dwf-viewer 解析 DWF 包和页面流
-  WebGL/WASM renderer 绘制 W2D、W3D/HSF 或 XPS 内容
+  WebGL 绘制 W2D 与 XPS/DWFx 矢量；Canvas 叠加文字/图片；复杂 2D 页面可使用 WASM fallback
       ↓
   CadViewer 仍然提供 summary、metadata 和生命周期控制
 ```
 
-`DwfLoader.load()` 仍可用于程序化读取元数据。`CadViewer` 在发现 loader 实现 `CadNativeRenderableLoader` 时调用 `mount()`。这样可以保持 loader registry 的统一入口，同时让复杂格式拥有独立优化渲染器。
+`DwfLoader.load()` 仍可用于程序化读取元数据。`CadViewer` 在发现 loader 实现 `CadNativeRenderableLoader` 时调用 `mount()`。这样可以保持 loader registry 的统一入口，同时让复杂格式拥有独立优化渲染器。DWF 通道会透传 `dwf-viewer` 的 WebGL/WASM 偏好、缓存预算、自适应线宽和高密度总览文字/填充阈值。
 
 ## Loader 合同
 
