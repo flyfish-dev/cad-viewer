@@ -64,7 +64,7 @@ spatial batch upload
 
 ## DWG Worker 模型
 
-DWG 是最重的解析路径，因此默认使用 Worker：
+DWG 是最重的解析路径，因此默认使用 Worker。打包后的 worker 会作为稳定运行时资源发布，默认从页面相对地址 `wasm/dwg-worker.js` 加载：
 
 ```text
 主线程
@@ -85,7 +85,7 @@ Worker 线程
 
 Worker 默认不会把 parser raw 对象传回主线程，避免 structured clone 失败，也避免大型图纸内存翻倍。只有调试时才建议使用 `keepRaw: true`。
 
-Loader 支持 `AbortSignal`、`workerTimeoutMs`、`workerUrl` 和 `workerFactory`，应用可以取消大文件加载，并适配自定义 bundler/CDN 资源布局。
+Loader 支持 `AbortSignal`、`workerTimeoutMs`、`workerUrl` 和 `workerFactory`，应用可以取消大文件加载，并适配自定义 bundler/CDN 资源布局。请把 `dwg-worker.js` 与 `/wasm` 运行时资源一起公开托管，或者显式传入 `workerUrl`。
 
 
 ## Native DWF 渲染模型

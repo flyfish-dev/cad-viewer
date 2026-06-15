@@ -64,7 +64,7 @@ Core performance choices:
 
 ## DWG worker model
 
-DWG is the heaviest path, so it is worker-backed by default:
+DWG is the heaviest path, so it is worker-backed by default. The packaged worker is built as a stable runtime asset and loaded from `wasm/dwg-worker.js` by default, resolved relative to the page URL:
 
 ```text
 main thread
@@ -85,7 +85,7 @@ main thread
 
 The worker payload intentionally excludes raw parser objects by default. That keeps messages structured-clone-safe and avoids doubling memory use for large drawings. Use `keepRaw: true` only for debugging.
 
-The loader accepts `AbortSignal`, `workerTimeoutMs`, `workerUrl` and `workerFactory`, so applications can cancel large files and integrate with custom bundler/CDN asset layouts.
+The loader accepts `AbortSignal`, `workerTimeoutMs`, `workerUrl` and `workerFactory`, so applications can cancel large files and integrate with custom bundler/CDN asset layouts. Serve `dwg-worker.js` beside the `/wasm` runtime assets or pass `workerUrl` explicitly.
 
 
 ## Native DWF renderer model

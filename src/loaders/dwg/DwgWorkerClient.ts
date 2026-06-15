@@ -48,6 +48,8 @@ type PendingRequest = {
   signal?: AbortSignal;
 };
 
+const DEFAULT_DWG_WORKER_URL = 'wasm/dwg-worker.js';
+
 export class DwgWorkerClient {
   private worker?: Worker;
   private sequence = 0;
@@ -217,8 +219,7 @@ export function supportsDwgWorker(): boolean {
 
 function createWorker(options: DwgWorkerLoadOptions): Worker {
   if (options.workerFactory) return options.workerFactory();
-  if (options.workerUrl) return new Worker(options.workerUrl, { type: 'module', name: 'lightweight-cad-dwg-loader' });
-  return new Worker(new URL('./DwgWorker.ts', import.meta.url), { type: 'module', name: 'lightweight-cad-dwg-loader' });
+  return new Worker(resolveWorkerUrl(options.workerUrl), { type: 'module', name: 'lightweight-cad-dwg-loader' });
 }
 
 function serializeOptions(options: DwgWorkerLoadOptions): Record<string, unknown> {
@@ -258,6 +259,13 @@ function resolveWasmPathForWorker(wasmPath: string | undefined): string {
   if (isAbsoluteUrl(candidate)) return candidate;
   if (candidate.startsWith('/')) return `${getPageOrigin()}${candidate}`;
   return new URL(candidate, getPageBaseUrl()).href.replace(/\/+$/, '');
+}
+
+function resolveWorkerUrl(workerUrl: string | URL | undefined): string | URL {
+  if (workerUrl instanceof URL) return workerUrl;
+  const candidate = workerUrl?.trim() || DEFAULT_DWG_WORKER_URL;
+  if (isAbsoluteUrl(candidate)) return candidate;
+  return new URL(candidate, getPageBaseUrl()).href;
 }
 
 function getPageBaseUrl(): string {

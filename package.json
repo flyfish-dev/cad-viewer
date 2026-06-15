@@ -1,6 +1,6 @@
 {
   "name": "@flyfish-dev/cad-viewer",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "A production-oriented lightweight frontend CAD viewer for DWG, DXF, DWF, DWFx and XPS, built with TypeScript, worker-backed DWG WebAssembly parsing, native dwf-viewer integration, WebGL 2D/3D rendering and Canvas overlays.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -56,6 +56,7 @@
     "./style.css": "./dist/style.css",
     "./wasm/libredwg-web.wasm": "./dist/wasm/libredwg-web.wasm",
     "./wasm/libredwg-web.js": "./dist/wasm/libredwg-web.js",
+    "./wasm/dwg-worker.js": "./dist/wasm/dwg-worker.js",
     "./dist/index.js": "./dist/index.js",
     "./dist/index.d.ts": "./dist/index.d.ts",
     "./wasm/dwfv-render.wasm": "./dist/wasm/dwfv-render.wasm"
@@ -77,11 +78,13 @@
   "scripts": {
     "clean": "node ./scripts/clean.cjs",
     "copy:wasm": "node ./scripts/copy-libredwg-wasm.cjs",
-    "dev": "npm run copy:wasm && vite --config vite.config.ts --host 0.0.0.0",
+    "copy:worker": "node ./scripts/copy-worker-asset.cjs",
+    "dev": "npm run copy:wasm && npm run build:worker && npm run copy:worker && vite --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:types": "tsc -p tsconfig.build.json",
-    "build:lib": "npm run copy:wasm && vite build --config vite.lib.config.ts && npm run build:types && npm run build:assets",
-    "build:demo": "npm run copy:wasm && vite build --config vite.config.ts",
+    "build:worker": "vite build --config vite.worker.config.ts",
+    "build:lib": "npm run copy:wasm && vite build --config vite.lib.config.ts && npm run build:worker && npm run build:types && npm run build:assets",
+    "build:demo": "npm run copy:wasm && npm run build:worker && npm run copy:worker && vite build --config vite.config.ts",
     "build": "npm run clean && npm run typecheck && npm run build:lib && npm run build:demo",
     "preview": "npm run build:demo && vite preview --config vite.config.ts --host 0.0.0.0",
     "pack:dry": "npm pack --dry-run",

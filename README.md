@@ -12,6 +12,12 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 
 > DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.6.4
+
+- Added a stable package export for `@flyfish-dev/cad-viewer/wasm/dwg-worker.js`.
+- DWG worker loading now defaults to the page-relative runtime asset `wasm/dwg-worker.js`, making npm package assets and static demo deployments use the same worker file.
+- Dev, demo, Cloudflare Pages and npm library builds now build and copy the DWG worker asset explicitly before serving or packaging runtime files.
+
 ## What changed in 0.6.3
 
 - Added `dxfEncoding` for overriding DXF text decoding when legacy files omit or misdeclare `$DWGCODEPAGE`.
@@ -99,16 +105,18 @@ npm install
 npm run dev
 ```
 
-The DWG and DWF render paths need runtime WASM assets in a public directory. This repository copies and validates them for the demo:
+The DWG and DWF render paths need runtime assets in a public directory: `libredwg-web.js`, `libredwg-web.wasm`, `dwg-worker.js` and `dwfv-render.wasm`. This repository copies, builds and validates them for the demo:
 
 ```bash
 npm run copy:wasm
+npm run build:worker
+npm run copy:worker
 npm run check:wasm
 ```
 
-The demo resolves `wasmPath` to an absolute URL before sending it to the DWG worker and uses the same directory for `dwfv-render.wasm`. In your own app, prefer an absolute path or URL, for example `/wasm` or `new URL('wasm/', document.baseURI).href`. Avoid passing a worker-relative path such as `./wasm` unless it is resolved on the UI thread first.
+The demo resolves `wasmPath` to an absolute URL before sending it to the DWG worker and uses the same directory for `dwfv-render.wasm`. The default DWG worker URL is `wasm/dwg-worker.js`, resolved against the page URL. In your own app, prefer absolute paths or URLs, for example `/wasm`, `/wasm/dwg-worker.js` or `new URL('wasm/', document.baseURI).href`. Avoid passing a worker-relative path such as `./wasm` unless it is resolved on the UI thread first.
 
-When publishing the npm package, `build:lib` copies these files into `dist/wasm` and exposes them as package subpaths. Applications still need to serve the `.wasm` files from a public URL and pass that directory as `wasmPath`, or pass `dwfWasmUrl` explicitly.
+When publishing the npm package, `build:lib` copies these files into `dist/wasm` and exposes them as package subpaths, including `./wasm/dwg-worker.js`. Applications still need to serve the runtime files from a public URL and pass that directory as `wasmPath`, or pass `dwfWasmUrl` / `workerUrl` explicitly.
 
 
 ## Demo startup notes
@@ -198,7 +206,7 @@ For very large drawings, lower `maxCurveSegments`, increase `spatialIndexCellCou
 
 ## Worker-backed DWG parsing
 
-`DwgLoader` uses a module Web Worker by default in browsers. The worker imports `@mlightcad/libredwg-web`, initializes LibreDWG WASM inside the worker thread, caches that WASM instance, decodes DWG bytes, normalizes the result into a structured-clone-safe `CadDocument`, and sends only the normalized scene back to the UI thread. Canvas rendering remains on the main thread.
+`DwgLoader` uses a module Web Worker by default in browsers. The default worker URL is `wasm/dwg-worker.js`, resolved relative to the page. The worker imports `@mlightcad/libredwg-web`, initializes LibreDWG WASM inside the worker thread, caches that WASM instance, decodes DWG bytes, normalizes the result into a structured-clone-safe `CadDocument`, and sends only the normalized scene back to the UI thread. Canvas rendering remains on the main thread.
 
 ```ts
 const controller = new AbortController();
@@ -221,7 +229,7 @@ await viewer.loadFile(file, { signal: controller.signal });
 controller.abort();
 ```
 
-Advanced deployments can override the worker constructor when the bundler or CDN has a custom asset layout:
+Advanced deployments can override the worker URL or constructor when the bundler or CDN has a custom asset layout:
 
 ```ts
 new CadViewer({
@@ -241,7 +249,7 @@ const viewer = new CadViewer({
   container,             // HTMLElement; creates a canvas inside
   canvas,                // optional existing HTMLCanvasElement
   renderer: 'auto',      // 'auto' | 'webgl' | 'canvas2d'
-  wasmPath: '/wasm',     // directory containing libredwg-web.wasm and dwfv-render.wasm
+  wasmPath: '/wasm',     // directory containing libredwg-web.js, libredwg-web.wasm and dwfv-render.wasm
   dxfEncoding: 'gb18030', // optional override when legacy DXF codepage metadata is wrong
   dwfWasmUrl: '/wasm/dwfv-render.wasm',
   autoFit: true,
@@ -261,6 +269,7 @@ const viewer = new CadViewer({
     maxVisibleTextLabels: 2400
   },
   useWorker: true,                 // default for DWG
+  workerUrl: '/wasm/dwg-worker.js', // optional override; this is the default path
   workerTimeoutMs: 0,              // 0 = disabled
   dwfPreferWebgl: true,
   dwfPreferWasm: true,

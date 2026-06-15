@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.4
+
+### Added
+
+- Added the package export `@flyfish-dev/cad-viewer/wasm/dwg-worker.js` for applications that copy runtime assets from the npm package.
+
+### Changed
+
+- DWG worker loading now defaults to a stable page-relative runtime asset, `wasm/dwg-worker.js`, instead of a bundler-generated worker chunk.
+- `build:lib`, `build:demo`, `dev` and Cloudflare Pages deployment now build the same DWG worker asset and copy it into the appropriate runtime directory.
+
+### Fixed
+
+- Prevented stale public worker files from overwriting the freshly built package worker during library asset copying.
+
 ## 0.6.3
 
 ### Added

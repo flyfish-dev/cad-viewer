@@ -12,6 +12,12 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.6.4 变更
+
+- 新增稳定的 package subpath：`@flyfish-dev/cad-viewer/wasm/dwg-worker.js`。
+- DWG worker 默认改为页面相对运行时资源 `wasm/dwg-worker.js`，npm 包资源和静态 Demo 部署使用同一份 worker 文件。
+- dev、demo、Cloudflare Pages 和 npm library 构建都会显式构建并复制 DWG worker 运行时资源。
+
 ## 0.6.3 变更
 
 - 新增 `dxfEncoding`，用于旧 DXF 缺少或误写 `$DWGCODEPAGE` 时显式指定文本编码。
@@ -99,16 +105,18 @@ npm install
 npm run dev
 ```
 
-DWG 和 DWF 渲染链路需要将运行时 WASM 文件放到公开目录。Demo 使用以下命令复制并校验到 `public/wasm`：
+DWG 和 DWF 渲染链路需要把运行时资源放到公开目录：`libredwg-web.js`、`libredwg-web.wasm`、`dwg-worker.js` 和 `dwfv-render.wasm`。Demo 使用以下命令复制、构建并校验到 `public/wasm`：
 
 ```bash
 npm run copy:wasm
+npm run build:worker
+npm run copy:worker
 npm run check:wasm
 ```
 
-Demo 会先把 `wasmPath` 解析为绝对 URL，再发送给 DWG worker，并复用同一目录查找 `dwfv-render.wasm`。你自己的应用也建议使用绝对路径或绝对 URL，例如 `/wasm` 或 `new URL('wasm/', document.baseURI).href`。不要直接把未解析的 `./wasm` 传入 worker，否则它可能会相对于 worker chunk 请求资源。
+Demo 会先把 `wasmPath` 解析为绝对 URL，再发送给 DWG worker，并复用同一目录查找 `dwfv-render.wasm`。默认 DWG worker 地址是 `wasm/dwg-worker.js`，相对于页面 URL 解析。你自己的应用也建议使用绝对路径或绝对 URL，例如 `/wasm`、`/wasm/dwg-worker.js` 或 `new URL('wasm/', document.baseURI).href`。不要直接把未解析的 `./wasm` 传入 worker，否则它可能会相对于 worker 请求资源。
 
-发布 npm 包时，`build:lib` 会把这些文件复制到 `dist/wasm` 并作为 package subpath 暴露出来。应用侧仍需要把 `.wasm` 放到可公开访问的 URL，并把该目录传给 `wasmPath`，或者显式传入 `dwfWasmUrl`。
+发布 npm 包时，`build:lib` 会把这些文件复制到 `dist/wasm` 并作为 package subpath 暴露出来，包括 `./wasm/dwg-worker.js`。应用侧仍需要把运行时资源放到可公开访问的 URL，并把该目录传给 `wasmPath`，或者显式传入 `dwfWasmUrl` / `workerUrl`。
 
 
 ## Demo 启动说明
@@ -198,7 +206,7 @@ new CadViewer({
 
 ## Worker 化 DWG 解析
 
-`DwgLoader` 在浏览器里默认使用 module Web Worker。Worker 内部导入 `@mlightcad/libredwg-web`，初始化 LibreDWG WASM，缓存该 WASM 实例，解码 DWG 字节，并把结果归一化为可 structured-clone 的 `CadDocument` 后发送回 UI 线程。Canvas 渲染仍然留在主线程。
+`DwgLoader` 在浏览器里默认使用 module Web Worker。默认 worker 地址是 `wasm/dwg-worker.js`，相对于页面 URL 解析。Worker 内部导入 `@mlightcad/libredwg-web`，初始化 LibreDWG WASM，缓存该 WASM 实例，解码 DWG 字节，并把结果归一化为可 structured-clone 的 `CadDocument` 后发送回 UI 线程。Canvas 渲染仍然留在主线程。
 
 ```ts
 const controller = new AbortController();
@@ -221,7 +229,7 @@ await viewer.loadFile(file, { signal: controller.signal });
 controller.abort();
 ```
 
-如果你的构建系统或 CDN 对 worker 资源路径有特殊要求，可以显式传入 worker 地址：
+如果你的构建系统或 CDN 对 worker 资源路径有特殊要求，可以显式传入 worker 地址或构造器：
 
 ```ts
 new CadViewer({
@@ -241,7 +249,7 @@ const viewer = new CadViewer({
   container,             // 容器元素，组件会自动创建 canvas
   canvas,                // 也可以传入已有 canvas
   renderer: 'auto',      // 'auto' | 'webgl' | 'canvas2d'
-  wasmPath: '/wasm',     // LibreDWG WebAssembly 资源路径。Worker 场景建议使用绝对路径/URL
+  wasmPath: '/wasm',     // 包含 libredwg-web.js、libredwg-web.wasm 和 dwfv-render.wasm 的目录
   dxfEncoding: 'gb18030', // 可选：旧 DXF codepage 元数据错误时显式指定编码
   dwfWasmUrl: '/wasm/dwfv-render.wasm',
   autoFit: true,
@@ -261,6 +269,7 @@ const viewer = new CadViewer({
     maxVisibleTextLabels: 2400
   },
   useWorker: true,                 // DWG 默认开启
+  workerUrl: '/wasm/dwg-worker.js', // 可选覆盖；这是默认地址
   workerTimeoutMs: 0,              // 0 表示不限制
   dwfPreferWebgl: true,
   dwfPreferWasm: true,

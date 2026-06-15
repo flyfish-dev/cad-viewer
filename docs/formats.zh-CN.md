@@ -33,4 +33,4 @@ DWF、DWFx 和 XPS 由 `DwfLoader` 通过已发布的 `dwf-viewer` 包处理。�
 - W3D/HSF 3D eModel shell geometry，包含模型树和材质元数据。
 - DWFx / OPC / XPS `FixedPage` 页面，包含 WebGL 加速矢量、浏览器允许 `FontFace` 时的 XPS 嵌入字体、文本和图片资源。
 
-`CadViewer` 会识别 native DWF loader，并将其挂载到 `nativeHost`；DWG/DXF 继续走统一 `CadDocument` + retained WebGL renderer。部署时请把 `dwfv-render.wasm` 与 `libredwg-web.wasm` 一起放在 `/wasm` 下，或显式传入 `dwfWasmUrl`。DWF/XPS 总览渲染可以通过 `dwfLineWeightMode`、`dwfMinStrokeCssPx`、`dwfMaxOverviewStrokeCssPx`、`dwfMinTextCssPx`、`dwfMinFilledAreaCssPx` 调节。
+`CadViewer` 会识别 native DWF loader，并将其挂载到 `nativeHost`；DWG/DXF 继续走统一 `CadDocument` + retained WebGL renderer。部署时请把 `dwg-worker.js`、`libredwg-web.js`、`libredwg-web.wasm` 和 `dwfv-render.wasm` 一起放在 `/wasm` 下，或显式传入 `workerUrl` / `dwfWasmUrl`。DWF/XPS 总览渲染可以通过 `dwfLineWeightMode`、`dwfMinStrokeCssPx`、`dwfMaxOverviewStrokeCssPx`、`dwfMinTextCssPx`、`dwfMinFilledAreaCssPx` 调节。
