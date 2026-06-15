@@ -18,10 +18,10 @@ export class DxfLoader implements CadLoader {
   }
 
   async load(input: CadLoadInput, options: CadLoadOptions = {}): Promise<CadLoadResult> {
-    void { ...this.defaults, ...options };
+    const mergedOptions = { ...this.defaults, ...options };
     const started = performance.now();
     const bytes = await readInputBytes(input);
-    const text = decodeDxfText(bytes);
+    const text = decodeDxfText(bytes, mergedOptions.dxfEncoding);
     const warnings: string[] = [];
     let parsed: unknown;
     try {
@@ -83,7 +83,7 @@ function normalizeDxfEntity(raw: Record<string, unknown>): CadEntity {
   }
   if (type === 'TEXT' || type === 'MTEXT' || type === 'ATTRIB' || type === 'ATTDEF') {
     entity.insertionPoint = pointFromUnknown(raw.startPoint ?? raw.position ?? raw.insertionPoint) ?? entity.insertionPoint;
-    entity.text = stringOrUndefined(raw.text ?? raw.string ?? raw.value) ?? entity.text;
+    entity.text = normalizeDxfText(raw.text ?? raw.string ?? raw.value) ?? entity.text;
     entity.textHeight = numberOrUndefined(raw.textHeight ?? raw.height) ?? entity.textHeight;
     entity.rotation = normalizeRotation(raw.rotation ?? raw.angle);
   }
@@ -214,10 +214,158 @@ function normalizeAngle(value: unknown): number | undefined {
   return Math.abs(n) > Math.PI * 2 + 1e-6 ? degreesToRadians(n) : n;
 }
 
-function decodeDxfText(bytes: Uint8Array): string {
-  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-  if (utf8.includes('SECTION')) return utf8;
-  return new TextDecoder('iso-8859-1', { fatal: false }).decode(bytes);
+export function decodeDxfText(bytes: Uint8Array, preferredEncoding?: string): string {
+  const explicitEncoding = normalizeDxfEncoding(preferredEncoding);
+  if (explicitEncoding) return decodeBytes(bytes, explicitEncoding);
+
+  const bomEncoding = detectBomEncoding(bytes);
+  if (bomEncoding) return decodeBytes(bytes, bomEncoding);
+
+  const declaredEncoding = normalizeDxfEncoding(detectDxfCodePage(bytes));
+  if (declaredEncoding) return decodeBytes(bytes, declaredEncoding);
+
+  const utf8 = decodeBytes(bytes, 'utf-8');
+  if (!utf8.includes('\uFFFD')) return utf8;
+
+  return chooseBestLegacyDxfDecode(bytes);
+}
+
+const DXF_CODEPAGE_ENCODING: Record<string, string> = {
+  ANSI_874: 'windows-874',
+  ANSI_932: 'shift_jis',
+  ANSI_936: 'gb18030',
+  ANSI_949: 'euc-kr',
+  ANSI_950: 'big5',
+  ANSI_1250: 'windows-1250',
+  ANSI_1251: 'windows-1251',
+  ANSI_1252: 'windows-1252',
+  ANSI_1253: 'windows-1253',
+  ANSI_1254: 'windows-1254',
+  ANSI_1255: 'windows-1255',
+  ANSI_1256: 'windows-1256',
+  ANSI_1257: 'windows-1257',
+  ANSI_1258: 'windows-1258',
+  BIG5: 'big5',
+  CP874: 'windows-874',
+  CP932: 'shift_jis',
+  CP936: 'gb18030',
+  CP949: 'euc-kr',
+  CP950: 'big5',
+  CP1250: 'windows-1250',
+  CP1251: 'windows-1251',
+  CP1252: 'windows-1252',
+  CP1253: 'windows-1253',
+  CP1254: 'windows-1254',
+  CP1255: 'windows-1255',
+  CP1256: 'windows-1256',
+  CP1257: 'windows-1257',
+  CP1258: 'windows-1258',
+  GB18030: 'gb18030',
+  GB2312: 'gb18030',
+  GBK: 'gb18030',
+  SHIFT_JIS: 'shift_jis',
+  SHIFTJIS: 'shift_jis',
+  SJIS: 'shift_jis',
+  UTF8: 'utf-8',
+  UTF_8: 'utf-8',
+  UTF16: 'utf-16le',
+  UTF_16: 'utf-16le',
+  UTF16LE: 'utf-16le',
+  UTF_16LE: 'utf-16le',
+  UTF16BE: 'utf-16be',
+  UTF_16BE: 'utf-16be'
+};
+
+function detectBomEncoding(bytes: Uint8Array): string | undefined {
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return 'utf-8';
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) return 'utf-16le';
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) return 'utf-16be';
+  return undefined;
+}
+
+function detectDxfCodePage(bytes: Uint8Array): string | undefined {
+  const header = decodeBytes(bytes.subarray(0, Math.min(bytes.byteLength, 128 * 1024)), 'iso-8859-1');
+  const lines = header.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  for (let index = 0; index < lines.length - 3; index++) {
+    if (lines[index]?.trim() !== '9' || lines[index + 1]?.trim().toUpperCase() !== '$DWGCODEPAGE') continue;
+    for (let cursor = index + 2; cursor < Math.min(index + 10, lines.length - 1); cursor += 2) {
+      const code = lines[cursor]?.trim();
+      const value = lines[cursor + 1]?.trim();
+      if (code === '3' && value) return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeDxfEncoding(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const key = trimmed.replace(/[-\s]+/g, '_').toUpperCase();
+  if (DXF_CODEPAGE_ENCODING[key]) return DXF_CODEPAGE_ENCODING[key];
+  const ansi = /^ANSI_(\d{3,4})$/.exec(key);
+  if (ansi) return normalizeDxfEncoding(`cp${ansi[1]}`);
+  const cp = /^CP(\d{3,4})$/.exec(key);
+  if (cp) {
+    if (cp[1] === '936') return 'gb18030';
+    if (cp[1] === '950') return 'big5';
+    if (cp[1] === '932') return 'shift_jis';
+    if (cp[1] === '949') return 'euc-kr';
+    return `windows-${cp[1]}`;
+  }
+  return trimmed;
+}
+
+function decodeBytes(bytes: Uint8Array, encoding: string): string {
+  try {
+    return new TextDecoder(encoding, { fatal: false }).decode(bytes);
+  } catch {
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  }
+}
+
+function chooseBestLegacyDxfDecode(bytes: Uint8Array): string {
+  const candidates = ['windows-1252', 'gb18030', 'big5', 'shift_jis', 'euc-kr', 'iso-8859-1'];
+  let bestText = '';
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const encoding of candidates) {
+    const text = decodeBytes(bytes, encoding);
+    const score = scoreDxfDecode(text, encoding);
+    if (score < bestScore) {
+      bestScore = score;
+      bestText = text;
+    }
+  }
+  return bestText || decodeBytes(bytes, 'utf-8');
+}
+
+function scoreDxfDecode(text: string, encoding: string): number {
+  const replacements = countMatches(text, /\uFFFD/g);
+  const controls = countMatches(text, /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g);
+  const cjk = countMatches(text, /[\u3400-\u9FFF\uF900-\uFAFF]/g);
+  const hasDxfStructure = text.includes('SECTION') && (text.includes('ENTITIES') || text.includes('HEADER'));
+  let score = replacements * 10000 + controls * 1000;
+  if (hasDxfStructure) score -= 500;
+  if (encoding === 'windows-1252') score -= 2;
+  if (encoding === 'gb18030' && cjk >= 2) score -= 50 + Math.min(cjk, 200) * 2;
+  return score;
+}
+
+function countMatches(text: string, pattern: RegExp): number {
+  return text.match(pattern)?.length ?? 0;
+}
+
+function normalizeDxfText(value: unknown): string | undefined {
+  const text = stringOrUndefined(value);
+  if (text === undefined) return undefined;
+  return text
+    .replace(/\\U\+([0-9a-fA-F]{4,6})/g, (match, code: string) => {
+      const point = Number.parseInt(code, 16);
+      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : match;
+    })
+    .replace(/%%[cC]/g, '\u2205')
+    .replace(/%%[dD]/g, '\u00b0')
+    .replace(/%%[pP]/g, '\u00b1')
+    .replace(/\\P/g, '\n');
 }
 
 interface DxfPair { code: number; value: string }

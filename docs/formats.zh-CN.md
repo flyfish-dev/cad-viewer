@@ -10,14 +10,14 @@ DWG loader 被隔离在 `DwgLoader` 后面，因此后续可以替换成其他 p
 
 ## DXF
 
-DXF 由 `DxfLoader` 处理：优先使用 `dxf-parser`，失败时使用内置 fallback 解析常见 ASCII DXF `ENTITIES`。
+DXF 由 `DxfLoader` 处理：优先使用 `dxf-parser`，失败时使用内置 fallback 解析常见 DXF `ENTITIES`。文本解码会识别显式 `dxfEncoding`、BOM 和 `$DWGCODEPAGE`，再进入 legacy 候选 fallback。
 
 支持预览：
 
 - LINE、CIRCLE、ARC。
 - LWPOLYLINE、POLYLINE、bulge 圆弧。
 - ELLIPSE、SPLINE 预览。
-- TEXT、MTEXT、ATTRIB。
+- TEXT、MTEXT、ATTRIB，并处理 `\U+XXXX`、`%%c`、`%%d`、`%%p`、`\P` 等常见 CAD 文本转义。
 - INSERT 块引用。
 - SOLID、TRACE、3DFACE。
 - HATCH boundary loop 预览。

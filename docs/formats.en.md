@@ -10,14 +10,14 @@ Rendering completeness depends on the normalized entities exposed by the parser.
 
 ## DXF
 
-DXF is handled by `DxfLoader` with `dxf-parser` first and a built-in fallback parser for common ASCII DXF `ENTITIES`.
+DXF is handled by `DxfLoader` with `dxf-parser` first and a built-in fallback parser for common DXF `ENTITIES`. Text decoding is codepage-aware: `DxfLoader` honors an explicit `dxfEncoding`, BOMs and `$DWGCODEPAGE` values before falling back to legacy candidates.
 
 Supported preview entities include:
 
 - LINE, CIRCLE, ARC.
 - LWPOLYLINE, POLYLINE, bulge arcs.
 - ELLIPSE, SPLINE preview.
-- TEXT, MTEXT, ATTRIB.
+- TEXT, MTEXT, ATTRIB, including common CAD escapes such as `\U+XXXX`, `%%c`, `%%d`, `%%p` and `\P`.
 - INSERT block references.
 - SOLID, TRACE, 3DFACE.
 - HATCH boundary loop preview.

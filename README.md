@@ -12,6 +12,12 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 
 > DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.6.3
+
+- Added `dxfEncoding` for overriding DXF text decoding when legacy files omit or misdeclare `$DWGCODEPAGE`.
+- DXF decoding now honors BOMs and `$DWGCODEPAGE` values such as `ANSI_936`, `CP936`, `GBK`, `BIG5`, `SHIFT_JIS` and Windows code pages before falling back.
+- DXF text entities now normalize common CAD escapes such as `\U+XXXX`, `%%c`, `%%d`, `%%p` and `\P`.
+
 ## What changed in 0.6.2
 
 - Updated the native DWF path to `dwf-viewer` 0.6.4 for upstream DWF/DWFx bug fixes while keeping this package on its own SemVer line.
@@ -236,6 +242,7 @@ const viewer = new CadViewer({
   canvas,                // optional existing HTMLCanvasElement
   renderer: 'auto',      // 'auto' | 'webgl' | 'canvas2d'
   wasmPath: '/wasm',     // directory containing libredwg-web.wasm and dwfv-render.wasm
+  dxfEncoding: 'gb18030', // optional override when legacy DXF codepage metadata is wrong
   dwfWasmUrl: '/wasm/dwfv-render.wasm',
   autoFit: true,
   canvasOptions: {
@@ -340,7 +347,7 @@ viewer.registerLoader({
 | Format | Loader | Coverage |
 |---|---|---|
 | DWG | `DwgLoader` | Uses LibreDWG WebAssembly. Rendering coverage depends on the entities exposed by LibreDWG conversion. |
-| DXF | `DxfLoader` | Uses `dxf-parser` plus fallback parsing. Supports core entities, blocks/inserts, colors/layers, polylines, text, hatch boundaries and splines as preview polylines. |
+| DXF | `DxfLoader` | Uses `dxf-parser` plus fallback parsing. Supports codepage-aware text decoding, CAD text escape normalization, core entities, blocks/inserts, colors/layers, polylines, hatch boundaries and splines as preview polylines. |
 | DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP packages, WHIP/W2D 2D sheets, W3D/HSF 3D eModel pages, model tree metadata, WebGL rendering and optional WASM fallback. |
 | DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS pages with WebGL-accelerated vector paths, embedded fonts, text, images, package resources and adaptive overview line weights through the native DWF renderer. |
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.3
+
+### Added
+
+- Added `dxfEncoding` to `CadLoadOptions` for explicitly decoding legacy DXF files with missing or incorrect `$DWGCODEPAGE` metadata.
+
+### Fixed
+
+- DXF loading is now codepage-aware: it honors explicit encodings, BOMs and `$DWGCODEPAGE`, avoiding the previous lossy ISO-8859-1 fallback for Chinese and other legacy drawings.
+- Normalized common CAD text escapes in DXF text entities, including `\U+XXXX`, `%%c`, `%%d`, `%%p` and `\P`.
+
 ## 0.6.2
 
 ### Changed

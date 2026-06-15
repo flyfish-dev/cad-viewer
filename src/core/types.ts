@@ -172,6 +172,12 @@ export interface CadLoadProgress {
 
 export interface CadLoadOptions {
   wasmPath?: string;
+  /**
+   * Explicit text encoding for DXF sources. DXF files normally declare this in
+   * `$DWGCODEPAGE`; use this only when legacy files are missing or lying about
+   * their code page, for example `gb18030`, `big5`, `shift_jis` or `windows-1252`.
+   */
+  dxfEncoding?: string;
   preferDwgWasm?: boolean;
   maxInsertDepth?: number;
   includePaperSpace?: boolean;

@@ -12,6 +12,12 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.6.3 变更
+
+- 新增 `dxfEncoding`，用于旧 DXF 缺少或误写 `$DWGCODEPAGE` 时显式指定文本编码。
+- DXF 解码现在会优先识别 BOM 和 `$DWGCODEPAGE`，支持 `ANSI_936`、`CP936`、`GBK`、`BIG5`、`SHIFT_JIS` 以及 Windows code page，不再把中文 DXF 退到有损的 ISO-8859-1。
+- DXF 文本实体会归一化常见 CAD 转义，例如 `\U+XXXX`、`%%c`、`%%d`、`%%p` 和 `\P`。
+
 ## 0.6.2 变更
 
 - 原生 DWF 通道升级到 `dwf-viewer` 0.6.4，包含上游 DWF/DWFx bugfix；本包继续按自身 SemVer 发布为 0.6.2。
@@ -236,6 +242,7 @@ const viewer = new CadViewer({
   canvas,                // 也可以传入已有 canvas
   renderer: 'auto',      // 'auto' | 'webgl' | 'canvas2d'
   wasmPath: '/wasm',     // LibreDWG WebAssembly 资源路径。Worker 场景建议使用绝对路径/URL
+  dxfEncoding: 'gb18030', // 可选：旧 DXF codepage 元数据错误时显式指定编码
   dwfWasmUrl: '/wasm/dwfv-render.wasm',
   autoFit: true,
   canvasOptions: {
@@ -340,7 +347,7 @@ viewer.registerLoader({
 | 格式 | Loader | 支持范围 |
 |---|---|---|
 | DWG | `DwgLoader` | 使用 LibreDWG WebAssembly。渲染完整度取决于 LibreDWG converter 暴露出的实体。 |
-| DXF | `DxfLoader` | 使用 `dxf-parser` + 内置 fallback。支持基础实体、block/insert、颜色/图层、多段线、文字、hatch boundary、spline 预览。 |
+| DXF | `DxfLoader` | 使用 `dxf-parser` + 内置 fallback。支持 codepage-aware 文本解码、CAD 文本转义归一化、基础实体、block/insert、颜色/图层、多段线、hatch boundary、spline 预览。 |
 | DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、模型树元数据、WebGL 渲染和可选 WASM fallback。 |
 | DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS 页面，包含 WebGL 加速 vector path、嵌入字体、文本、图片、包内资源和自适应总览线宽，通过原生 DWF 渲染器展示。 |
 
