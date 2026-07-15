@@ -20,7 +20,8 @@ DWG：DwgLoader.load() → DwgWorkerClient → DwgWorker → LibreDWG WASM
 DXF：DxfLoader.load() → CadDocument
 DWF/DWFx/XPS：DwfLoader.mount() → dwf-viewer native renderer
   ↓
-DWG/DXF：retained WebGL batches + Canvas overlay
+DWG：WCS CadDocument + LTYPE/saved view → 安全场景变换 → retained WebGL batches + Canvas overlay
+DXF：CadDocument → retained WebGL batches + Canvas overlay
 DWF/DWFx/XPS：W2D/XPS WebGL 矢量 + W3D/HSF 3D + Canvas 文字/图片 overlay + 可选 WASM fallback
 ```
 
@@ -30,7 +31,9 @@ DWF/DWFx/XPS：W2D/XPS WebGL 矢量 + W3D/HSF 3D + Canvas 文字/图片 overlay 
 src/core/types.ts       公共数据模型
 src/core/color.ts       ACI / true color / BYLAYER 解析
 src/core/geometry.ts    CAD 几何工具
-src/core/transform.ts   block insert 与 XPS matrix 变换
+src/core/linetype.ts    LTYPE 解析、继承与 dash/dot 展开
+src/core/scene.ts       saved-view 场景归一化
+src/core/transform.ts   block insert、saved-view 与 XPS matrix 变换
 src/loaders/            loader registry 与默认 loaders
 src/loaders/dwg/        基于 Worker 的 LibreDWG 集成
 src/loaders/dwf/        原生 dwf-viewer 集成
@@ -45,7 +48,7 @@ src/viewer/             组件、WebGL renderer、Canvas fallback
 ```text
 CadDocument
   ↓
-block expansion / curve tessellation / fill triangulation
+saved-view transform / block expansion / curve tessellation / linetype expansion / fill triangulation
   ↓
 Float32Array positions + Uint8Array colors
   ↓
@@ -59,6 +62,7 @@ spatial batch upload
 - 坐标以图纸中心为 origin 存储，降低大坐标 Float32 精度损失。
 - 线、面、点分开上传，颜色使用 normalized `Uint8Array`。
 - 按图纸范围空间分桶，放大后只提交视口相交 batch。
+- DWG 线型在多段线边之间保持 world-unit 相位；零长度 dot 和暂不可用的复杂 SHX glyph 使用屏幕 marker。
 - 文本和图片不进入 GPU 主几何流，使用 overlay 并做阈值/数量限制。
 - WebGL 不可用时，`renderer: 'auto'` 回退到 `CadCanvasRenderer`。
 
@@ -133,11 +137,15 @@ interface CadNativeRenderableLoader extends CadLoader {
 `CadDocument` 包含：
 
 - `layers`：归一化图层信息。
+- `lineTypes`：按名称和 handle 索引的 LTYPE 定义。
 - `blocks`：可复用块定义。
 - `entities`：顶层实体。
 - `pages`：可选页面实体和 native renderer 元数据。
+- `savedView`：active VPORT 或 header UCS 的视图元数据及安全 2D 场景变换。
 - `warnings`：非致命解析/渲染限制。
 - `raw`：原始 parser 输出，便于调试。
+
+对 DWG，`getSourceDocument()` 返回 parser 保留的 WCS document，`getDocument()` 返回应用安全平面 saved-view 变换后的渲染场景。`VIEWDIR` 缺失、非法或倾斜时不会改变 WCS 坐标，并会产生 warning。
 
 ## 默认渲染覆盖
 

@@ -12,6 +12,13 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.6.5 变更
+
+- 保留 DWG active VPORT/header UCS saved view，并将安全的平面场景变换只应用一次，统一覆盖几何、文字、INSERT、bounds 和交互坐标。
+- 新增 DWG LTYPE 归一化与 Canvas2D/WebGL 线型渲染，支持虚线、点线、BYLAYER、BYBLOCK、多段线连续相位以及实体/全局缩放。
+- 保留 LibreDWG 的闭合多段线标志；对倾斜视图、复杂 SHX 线型 glyph 和异常微小 pattern 提供明确降级策略。
+- 新增公开线型工具、`getSourceDocument()` 和 8 项 DWG normalization 回归测试。
+
 ## 0.6.4 变更
 
 - 新增稳定的 package subpath：`@flyfish-dev/cad-viewer/wasm/dwg-worker.js`。
@@ -85,6 +92,7 @@
 - **纯前端组件**：`new CadViewer({ container })` 或 `new CadViewer({ canvas })`。
 - **正确的 loader 架构**：DWG / DXF / DWF 独立 loader，可替换、可扩展；native-renderable loader 可以挂载自己的优化渲染器。
 - **DWG 预览**：通过 LibreDWG WebAssembly 在浏览器本地解析，默认在 Web Worker 中执行。
+- **DWG 视图与线型保真**：active 平面 saved view、闭合多段线、LTYPE 表、BYLAYER/BYBLOCK 继承、dash/dot pattern 和稳定线型缩放。
 - **DXF 预览**：JavaScript 解析，支持常见 ASCII DXF `ENTITIES`，并带 fallback parser。
 - **DWF/DWFx/XPS 预览**：由 `dwf-viewer` 支持 DWF ZIP 包、WebGL 加速 W2D 与 XPS/DWFx 2D 矢量、W3D/HSF eModel、XPS 嵌入字体、自适应 CAD 线宽和 raster fallback。
 - **CAD 颜色处理**：支持 ACI、BYLAYER、BYBLOCK 继承、DWG 图层颜色、true color、填充色、透明度和自适应对比度。
@@ -291,6 +299,8 @@ viewer.zoomIn();
 viewer.zoomOut();
 await viewer.preloadDwg();       // 可选 DWG worker/WASM 预热
 viewer.setCanvasOptions({ background: '#f7f8fb', foreground: '#111827' });
+viewer.getDocument();            // 已应用 saved view 的渲染场景 CadDocument
+viewer.getSourceDocument();      // parser 保留的原始 WCS CadDocument
 viewer.clear();
 viewer.destroy();
 ```
@@ -355,7 +365,7 @@ viewer.registerLoader({
 
 | 格式 | Loader | 支持范围 |
 |---|---|---|
-| DWG | `DwgLoader` | 使用 LibreDWG WebAssembly。渲染完整度取决于 LibreDWG converter 暴露出的实体。 |
+| DWG | `DwgLoader` | 使用 LibreDWG WebAssembly。保留 active 平面 saved view、闭合多段线和 LTYPE 定义；Canvas2D/WebGL 支持 dash/dot 与 BYLAYER/BYBLOCK 继承，复杂 SHX glyph 使用 marker 近似。 |
 | DXF | `DxfLoader` | 使用 `dxf-parser` + 内置 fallback。支持 codepage-aware 文本解码、CAD 文本转义归一化、基础实体、block/insert、颜色/图层、多段线、hatch boundary、spline 预览。 |
 | DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、模型树元数据、WebGL 渲染和可选 WASM fallback。 |
 | DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS 页面，包含 WebGL 加速 vector path、嵌入字体、文本、图片、包内资源和自适应总览线宽，通过原生 DWF 渲染器展示。 |
@@ -385,6 +395,7 @@ new CadViewer({ canvasOptions: { trueColorByteOrder: 'bgr' } });
 npm install
 npm run dev          # 运行 demo
 npm run typecheck    # TypeScript 检查
+npm test             # 构建 library 并运行 DWG normalization 回归测试
 npm run build        # 构建 library + demo
 npm run preview      # 预览构建后的 demo
 ```

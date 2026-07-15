@@ -6,7 +6,7 @@ DWG is a proprietary binary CAD database. This project uses `@mlightcad/libredwg
 
 The loader is intentionally isolated behind `DwgLoader`, so it can be replaced with another parser or a licensed conversion backend.
 
-Rendering completeness depends on the normalized entities exposed by the parser. The renderer covers common 2D primitives and block insert expansion when block definitions are available.
+Rendering completeness depends on the normalized entities exposed by the parser. The renderer covers common 2D primitives and block insert expansion when block definitions are available. The DWG path also preserves the active VPORT/header UCS saved view, LTYPE definitions, linetype scales and converter-specific closed-polyline flags. Safe planar saved views are applied once to the render scene; invalid or tilted views keep WCS coordinates. Canvas2D and WebGL render dashed/dotted patterns with BYLAYER/BYBLOCK inheritance, while complex SHX glyphs use a marker approximation.
 
 ## DXF
 

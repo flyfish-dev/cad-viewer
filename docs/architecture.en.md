@@ -20,7 +20,8 @@ DWG: DwgLoader.load() → DwgWorkerClient → DwgWorker → LibreDWG WASM
 DXF: DxfLoader.load() → CadDocument
 DWF/DWFx/XPS: DwfLoader.mount() → dwf-viewer native renderer
   ↓
-DWG/DXF: retained WebGL batches + Canvas overlay
+DWG: WCS CadDocument + LTYPE/saved view → safe scene transform → retained WebGL batches + Canvas overlay
+DXF: CadDocument → retained WebGL batches + Canvas overlay
 DWF/DWFx/XPS: W2D/XPS WebGL vectors + W3D/HSF 3D + Canvas text/image overlay + optional WASM fallback
 ```
 
@@ -30,7 +31,9 @@ DWF/DWFx/XPS: W2D/XPS WebGL vectors + W3D/HSF 3D + Canvas text/image overlay + o
 src/core/types.ts       public data model
 src/core/color.ts       ACI / true color / BYLAYER resolution
 src/core/geometry.ts    CAD geometry helpers
-src/core/transform.ts   block insert and XPS matrix transforms
+src/core/linetype.ts    LTYPE resolution, inheritance and dash/dot expansion
+src/core/scene.ts       saved-view scene normalization
+src/core/transform.ts   block insert, saved-view and XPS matrix transforms
 src/loaders/            loader registry and default loaders
 src/loaders/dwg/        worker-backed LibreDWG integration
 src/loaders/dwf/        native dwf-viewer integration
@@ -45,7 +48,7 @@ src/viewer/             component, WebGL renderer and Canvas fallback
 ```text
 CadDocument
   ↓
-block expansion / curve tessellation / fill triangulation
+saved-view transform / block expansion / curve tessellation / linetype expansion / fill triangulation
   ↓
 Float32Array positions + Uint8Array colors
   ↓
@@ -59,6 +62,7 @@ Core performance choices:
 - Coordinates are stored relative to the drawing center to reduce Float32 precision loss with large CAD coordinates.
 - Lines, fills and points are uploaded separately; colors use normalized `Uint8Array`.
 - Geometry is bucketed spatially, so zoomed-in views submit only batches intersecting the viewport.
+- DWG line patterns keep world-unit phase across polyline edges; zero-length dots and unavailable complex SHX glyphs use screen-space markers.
 - Text and images are kept out of the main GPU geometry stream and drawn through an overlay with size/count limits.
 - When WebGL is unavailable, `renderer: 'auto'` falls back to `CadCanvasRenderer`.
 
@@ -133,11 +137,15 @@ Regular loaders return a `CadDocument`, not renderer-specific draw calls. Native
 A `CadDocument` contains:
 
 - `layers`: normalized layer metadata.
+- `lineTypes`: normalized LTYPE definitions, indexed by name and handle.
 - `blocks`: reusable block definitions.
 - `entities`: top-level entities.
 - `pages`: optional page entities and native-renderer metadata.
+- `savedView`: active VPORT or header-UCS view metadata and its safe 2D scene transform.
 - `warnings`: non-fatal parsing or rendering limitations.
 - `raw`: optional source parser output for debugging.
+
+For DWG, `getSourceDocument()` returns the parser-owned WCS document. `getDocument()` returns the render scene after a safe planar saved-view transform. Invalid, missing or tilted `VIEWDIR` values leave WCS coordinates unchanged and add a warning.
 
 ## Renderer coverage
 

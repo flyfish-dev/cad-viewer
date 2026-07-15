@@ -12,6 +12,13 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 
 > DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.6.5
+
+- Preserved active DWG VPORT/header UCS saved views and applied safe planar scene transforms exactly once across geometry, text, inserts, bounds and interaction coordinates.
+- Added DWG LTYPE normalization and Canvas2D/WebGL rendering for dashed, dotted, BYLAYER and BYBLOCK linetypes, including continuous polyline phase and entity/global scale handling.
+- Preserved LibreDWG closed-polyline flags and added guarded fallbacks for tilted views, complex SHX linetype glyphs and pathological microscopic patterns.
+- Added public line-pattern helpers, `getSourceDocument()` and an eight-case DWG normalization regression suite.
+
 ## What changed in 0.6.4
 
 - Added a stable package export for `@flyfish-dev/cad-viewer/wasm/dwg-worker.js`.
@@ -85,6 +92,7 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 - **Pure frontend viewer component**: `new CadViewer({ container })` or `new CadViewer({ canvas })`.
 - **Loader registry**: DWG, DXF and DWF loaders are independent and replaceable; native-renderable loaders can mount their own optimized viewer.
 - **DWG preview**: browser-local parsing through LibreDWG WebAssembly, executed in a Web Worker by default.
+- **DWG view and linetype fidelity**: active planar saved views, closed polylines, LTYPE tables, BYLAYER/BYBLOCK inheritance, dash/dot patterns and stable pattern scaling.
 - **DXF preview**: JavaScript parser path with fallback support for common ASCII DXF `ENTITIES`.
 - **DWF/DWFx/XPS preview**: powered by `dwf-viewer` for DWF ZIP packages, WebGL-accelerated W2D and XPS/DWFx 2D vectors, W3D/HSF eModel geometry, embedded XPS fonts, adaptive CAD line weights and raster fallback.
 - **CAD color handling**: ACI, BYLAYER, BYBLOCK inheritance, DWG layer colors, true color, fill color, opacity and adaptive contrast.
@@ -291,6 +299,8 @@ viewer.zoomIn();
 viewer.zoomOut();
 await viewer.preloadDwg();       // optional DWG worker/WASM warmup
 viewer.setCanvasOptions({ background: '#f7f8fb', foreground: '#111827' });
+viewer.getDocument();            // transformed render-space CadDocument
+viewer.getSourceDocument();      // parser-owned WCS CadDocument
 viewer.clear();
 viewer.destroy();
 ```
@@ -355,7 +365,7 @@ viewer.registerLoader({
 
 | Format | Loader | Coverage |
 |---|---|---|
-| DWG | `DwgLoader` | Uses LibreDWG WebAssembly. Rendering coverage depends on the entities exposed by LibreDWG conversion. |
+| DWG | `DwgLoader` | Uses LibreDWG WebAssembly. Preserves active planar saved views, closed polylines and LTYPE definitions; Canvas2D/WebGL render dash/dot patterns with BYLAYER/BYBLOCK inheritance. Complex SHX glyphs use a marker approximation. |
 | DXF | `DxfLoader` | Uses `dxf-parser` plus fallback parsing. Supports codepage-aware text decoding, CAD text escape normalization, core entities, blocks/inserts, colors/layers, polylines, hatch boundaries and splines as preview polylines. |
 | DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP packages, WHIP/W2D 2D sheets, W3D/HSF 3D eModel pages, model tree metadata, WebGL rendering and optional WASM fallback. |
 | DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS pages with WebGL-accelerated vector paths, embedded fonts, text, images, package resources and adaptive overview line weights through the native DWF renderer. |
@@ -385,6 +395,7 @@ new CadViewer({ canvasOptions: { trueColorByteOrder: 'bgr' } });
 npm install
 npm run dev          # run the demo
 npm run typecheck    # TypeScript validation
+npm test             # build the library and run DWG normalization regressions
 npm run build        # library + demo
 npm run preview      # preview built demo
 ```

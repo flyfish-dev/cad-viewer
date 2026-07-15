@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.5
+
+### Added
+
+- Added normalized DWG `CadLineType`, `CadLineTypeElement` and `CadSavedView` data, together with public helpers for resolving and expanding CAD line patterns.
+- Added `CadViewer.getSourceDocument()` so applications can inspect the parser-owned WCS document while `getDocument()` exposes the transformed render scene.
+- Added regression tests for active VPORT/header UCS handling, scene-transform idempotence, closed polyline flags, LTYPE scaling/inheritance, complex markers and pathological pattern limits.
+
+### Changed
+
+- Canvas2D and retained WebGL now render DWG dashed, dotted, BYLAYER and BYBLOCK linetypes with continuous phase across polyline edges.
+- Safe planar saved views from the active VPORT or header UCS are applied once to geometry, text, inserts, bounds and interaction coordinates.
+- npm prepublish validation now runs the DWG normalization regression suite before package inspection.
+
+### Fixed
+
+- Preserved LibreDWG LTYPE definitions, entity linetype scales and the converter-specific LWPOLYLINE/classic POLYLINE closed flags.
+- Tilted or invalid `VIEWDIR` values now keep WCS coordinates and emit a warning instead of applying an unsafe 2D transform.
+- Microscopic or corrupt linetype patterns degrade to visible source edges instead of causing unbounded geometry expansion.
+
 ## 0.6.4
 
 ### Added

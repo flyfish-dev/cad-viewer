@@ -6,7 +6,7 @@ DWG 是专有二进制 CAD 数据库格式。本项目默认使用 `@mlightcad/l
 
 DWG loader 被隔离在 `DwgLoader` 后面，因此后续可以替换成其他 parser，或替换成授权转换服务。
 
-渲染完整度取决于 parser 暴露出的归一化实体。默认 renderer 覆盖常见 2D 基础实体，并在 block 定义可用时展开 INSERT。
+渲染完整度取决于 parser 暴露出的归一化实体。默认 renderer 覆盖常见 2D 基础实体，并在 block 定义可用时展开 INSERT。DWG 链路还会保留 active VPORT/header UCS saved view、LTYPE 定义、线型缩放和 converter 特有的闭合多段线 flag。安全的平面 saved view 只应用一次；非法或倾斜视图保留 WCS 坐标。Canvas2D 与 WebGL 支持 BYLAYER/BYBLOCK 虚线和点线，复杂 SHX glyph 使用 marker 近似。
 
 ## DXF
 
