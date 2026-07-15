@@ -12,6 +12,12 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.6.6 变更
+
+- 新增基于有效 DWG active VPORT 内有意义几何的自动首屏拟合，避免远距离坐标簇把主图压缩成小黑点。
+- 新增 `fitMode: 'auto' | 'saved-view' | 'extents'` 和 `viewer.fit(mode)`，分别用于智能内容拟合、严格恢复保存视口及查看全部图形范围。
+- 统一 retained WebGL renderer 与 Canvas2D fallback 的边界计算和拟合行为。
+
 ## 0.6.5 变更
 
 - 保留 DWG active VPORT/header UCS saved view，并将安全的平面场景变换只应用一次，统一覆盖几何、文字、INSERT、bounds 和交互坐标。
@@ -158,6 +164,7 @@ const viewer = new CadViewer({
   canvasOptions: {
     background: '#05070d',
     foreground: '#f8fafc',
+    fitMode: 'auto',
     contrastMode: 'adaptive',
     minColorContrast: 2.45
   }
@@ -170,6 +177,8 @@ input.addEventListener('change', async () => {
   await viewer.loadFile(file);
 });
 ```
+
+`fitMode: 'auto'` 是默认值。DWG 存在有效 active VPORT 时，会拟合保存视口内有意义的几何内容，避免远距离测绘坐标或辅助实体把主图框压成小黑点。使用 `viewer.fit('saved-view')` 可严格恢复保存视口，使用 `viewer.fit('extents')` 可查看全部坐标簇。
 
 
 ## WebGL 渲染与性能策略
@@ -264,6 +273,7 @@ const viewer = new CadViewer({
   canvasOptions: {
     background: '#05070d',
     foreground: '#ffffff',
+    fitMode: 'auto',                 // 'auto' | 'saved-view' | 'extents'
     contrastMode: 'adaptive',       // 'adaptive' | 'preserve'
     minColorContrast: 2.45,
     showPageBounds: true,
@@ -294,7 +304,9 @@ const viewer = new CadViewer({
 
 await viewer.loadFile(file);
 await viewer.loadBuffer(arrayBuffer, 'drawing.dxf');
-viewer.fit();
+viewer.fit();                       // 自动拟合有意义的首屏内容
+viewer.fit('saved-view');          // 严格恢复 DWG active viewport
+viewer.fit('extents');             // 查看全部几何，包括远距离坐标簇
 viewer.zoomIn();
 viewer.zoomOut();
 await viewer.preloadDwg();       // 可选 DWG worker/WASM 预热

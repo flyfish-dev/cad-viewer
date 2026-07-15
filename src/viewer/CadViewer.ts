@@ -1,7 +1,7 @@
 import { createDefaultLoaderRegistry } from '../loaders';
 import type { CadLoaderRegistry } from '../loaders/CadLoaderRegistry';
 import { summarizeCadDocument } from '../core/entity';
-import { isCadNativeRenderableLoader, type CadDocument, type CadLoadInput, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadNativeRenderableLoader } from '../core/types';
+import { isCadNativeRenderableLoader, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadNativeRenderableLoader } from '../core/types';
 import { CadCanvasRenderer, type CanvasViewerOptions, type RenderStats, type ViewChangeEvent } from './CadCanvasRenderer';
 import { CadWebGLRenderer, isWebGLAvailable } from './CadWebGLRenderer';
 
@@ -115,9 +115,9 @@ export class CadViewer {
     return result;
   }
 
-  fit(): void {
+  fit(mode?: CadFitMode): void {
     if (this.activeNativeLoader) this.activeNativeLoader.fit?.();
-    else this.renderer.fitToView();
+    else this.renderer.fitToView(0.92, mode);
   }
 
   zoomIn(): void {

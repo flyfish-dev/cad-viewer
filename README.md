@@ -12,6 +12,12 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 
 > DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.6.6
+
+- Added automatic initial fitting based on meaningful geometry inside a valid active DWG viewport, preventing remote coordinate clusters from shrinking the main drawing into a dot.
+- Added `fitMode: 'auto' | 'saved-view' | 'extents'` and `viewer.fit(mode)` for automatic content fitting, exact saved-view restoration or complete drawing extents.
+- Unified bounds and fitting behavior across the retained WebGL renderer and Canvas2D fallback.
+
 ## What changed in 0.6.5
 
 - Preserved active DWG VPORT/header UCS saved views and applied safe planar scene transforms exactly once across geometry, text, inserts, bounds and interaction coordinates.
@@ -158,6 +164,7 @@ const viewer = new CadViewer({
   canvasOptions: {
     background: '#05070d',
     foreground: '#f8fafc',
+    fitMode: 'auto',
     contrastMode: 'adaptive',
     minColorContrast: 2.45
   }
@@ -170,6 +177,8 @@ input.addEventListener('change', async () => {
   await viewer.loadFile(file);
 });
 ```
+
+`fitMode: 'auto'` is the default. For DWG files with a valid active VPORT, it fits meaningful geometry inside the saved viewport, so remote survey coordinates or auxiliary geometry do not collapse the main sheet into a dot. Use `viewer.fit('saved-view')` to restore the exact saved viewport, or `viewer.fit('extents')` to include every coordinate cluster.
 
 
 ## WebGL rendering and performance model
@@ -264,6 +273,7 @@ const viewer = new CadViewer({
   canvasOptions: {
     background: '#05070d',
     foreground: '#ffffff',
+    fitMode: 'auto',                 // 'auto' | 'saved-view' | 'extents'
     contrastMode: 'adaptive',       // 'adaptive' | 'preserve'
     minColorContrast: 2.45,
     showPageBounds: true,
@@ -294,7 +304,9 @@ const viewer = new CadViewer({
 
 await viewer.loadFile(file);
 await viewer.loadBuffer(arrayBuffer, 'drawing.dxf');
-viewer.fit();
+viewer.fit();                       // automatic meaningful-content fit
+viewer.fit('saved-view');          // exact active DWG viewport
+viewer.fit('extents');             // all geometry, including remote coordinate clusters
 viewer.zoomIn();
 viewer.zoomOut();
 await viewer.preloadDwg();       // optional DWG worker/WASM warmup

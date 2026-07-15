@@ -19,6 +19,8 @@ export interface CadBounds {
   maxY: number;
 }
 
+export type CadFitMode = 'auto' | 'saved-view' | 'extents';
+
 export interface CadLayer {
   name: string;
   color?: string | number;

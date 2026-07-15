@@ -147,6 +147,8 @@ interface CadNativeRenderableLoader extends CadLoader {
 
 对 DWG，`getSourceDocument()` 返回 parser 保留的 WCS document，`getDocument()` 返回应用安全平面 saved-view 变换后的渲染场景。`VIEWDIR` 缺失、非法或倾斜时不会改变 WCS 坐标，并会产生 warning。
 
+Bounds 分为两类职责：完整场景范围继续用于 culling、检查和 `fit('extents')`；默认自动拟合会将实体范围与有效 active VPORT 求交，并收紧到其中有意义的可见内容。这样既保留远距离有效坐标簇，又不会让它们把首屏主图框压成小黑点。
+
 ## 默认渲染覆盖
 
 WebGL renderer 和 Canvas2D fallback 支持常见预览几何：

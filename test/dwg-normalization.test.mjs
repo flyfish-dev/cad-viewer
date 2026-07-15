@@ -3,10 +3,13 @@ import test from 'node:test';
 
 import {
   applyByBlockLineTypeInheritance,
+  computeCadDocumentBounds,
   createCadSceneDocument,
   createDashedCadPrimitives,
   createDashedCadSegments,
   normalizeDwgDatabase,
+  resolveCadFitBounds,
+  resolveCadSavedViewBounds,
   resolveCadLinePattern
 } from '../dist/cad-viewer.es.js';
 
@@ -238,6 +241,50 @@ test('missing, non-finite or tilted VIEWDIR keeps world coordinates and warns', 
     assert.ok(document.warnings.some((warning) => warning.includes('kept world coordinates')));
     assert.equal(createCadSceneDocument(document), document, 'an unsafe saved view must not create a scene clone');
   }
+});
+
+test('saved DWG viewport keeps remote coordinate clusters out of the automatic initial fit', () => {
+  const document = normalizeDwgDatabase({
+    tables: {
+      VPORT: {
+        entries: [{
+          handle: 'ACTIVE-SHEET',
+          name: '*Active',
+          center: { x: 420, y: 297 },
+          viewDirectionFromTarget: { x: 0, y: 0, z: 1 },
+          viewHeight: 1420,
+          aspectRatio: 2.146
+        }]
+      }
+    },
+    entities: [{
+      type: 'LINE',
+      handle: 'SHEET-DIAGONAL',
+      startPoint: { x: 0, y: 0 },
+      endPoint: { x: 840, y: 594 }
+    }, {
+      type: 'LINE',
+      handle: 'REMOTE-SURVEY',
+      startPoint: { x: -3_059_307, y: -1_780_563 },
+      endPoint: { x: -3_058_337, y: -1_779_882 }
+    }]
+  }, 'remote-cluster.dwg');
+  const scene = createCadSceneDocument(document);
+  const extents = computeCadDocumentBounds(scene);
+  const savedView = resolveCadSavedViewBounds(scene);
+  const automatic = resolveCadFitBounds(scene, extents, 'auto');
+
+  assert.ok(extents.minX < -3_000_000, 'full extents must retain the remote survey geometry');
+  nearlyEqual(savedView?.minX, 420 - 1420 * 2.146 / 2);
+  nearlyEqual(savedView?.maxX, 420 + 1420 * 2.146 / 2);
+  nearlyEqual(savedView?.minY, -413);
+  nearlyEqual(savedView?.maxY, 1007);
+  nearlyEqual(automatic.minX, -16.8);
+  nearlyEqual(automatic.minY, -11.88);
+  nearlyEqual(automatic.maxX, 856.8);
+  nearlyEqual(automatic.maxY, 605.88);
+  assert.deepEqual(resolveCadFitBounds(scene, extents, 'saved-view'), savedView);
+  assert.deepEqual(resolveCadFitBounds(scene, extents, 'extents'), extents);
 });
 
 test('line patterns resolve handle/layer inheritance and stable world-unit scaling', () => {

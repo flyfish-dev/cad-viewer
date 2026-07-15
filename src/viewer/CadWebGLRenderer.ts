@@ -1,10 +1,11 @@
 import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor } from '../core/color';
-import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includeCircle, includePoint, isFinitePoint, paddedBounds, stripMTextFormatting, xy } from '../core/geometry';
+import { computeCadDocumentBounds, resolveCadFitBounds } from '../core/bounds';
+import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includePoint, isFinitePoint, stripMTextFormatting, xy } from '../core/geometry';
 import { inferEntityKind, isCadPolylineClosed } from '../core/entity';
 import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern } from '../core/linetype';
 import { createCadSceneDocument } from '../core/scene';
 import { matrixFromInsert, transformEntity } from '../core/transform';
-import type { CadBlock, CadBounds, CadDocument, CadEntity, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
+import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
 import type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './CadCanvasRenderer';
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
@@ -96,6 +97,7 @@ const DEFAULT_WEBGL_OPTIONS: Required<CanvasViewerOptions> = {
   wheelZoomFactor: 1.14,
   trueColorByteOrder: 'rgb',
   maxInsertDepth: 16,
+  fitMode: 'auto',
   contrastMode: 'adaptive',
   minColorContrast: 2.4,
   maxCurveSegments: 96,
@@ -178,7 +180,7 @@ export class CadWebGLRenderer {
   setDocument(document: CadDocument): void {
     this.sourceDocument = document;
     this.document = createCadSceneDocument(document);
-    this.bounds = computeBounds(this.document, this.opts);
+    this.bounds = computeCadDocumentBounds(this.document, this.boundsOptions());
     this.disposeScene();
     const cpuScene = buildCpuScene(this.document, this.opts, this.bounds);
     this.scene = uploadScene(this.gl, cpuScene);
@@ -194,9 +196,14 @@ export class CadWebGLRenderer {
 
   setOptions(options: CanvasViewerOptions): void {
     const rebuildRequired = requiresSceneRebuild(this.opts, options);
+    const refit = options.fitMode !== undefined && options.fitMode !== this.opts.fitMode;
     this.opts = { ...this.opts, ...options };
     if (rebuildRequired && (this.sourceDocument ?? this.document)) {
       this.setDocument(this.sourceDocument ?? this.document!);
+      return;
+    }
+    if (refit && this.document) {
+      this.fitToView();
       return;
     }
     this.render();
@@ -207,8 +214,11 @@ export class CadWebGLRenderer {
     return { ...this.opts };
   }
 
-  fitToView(padding = 0.92): void {
-    if (!boundsValid(this.bounds)) {
+  fitToView(padding = 0.92, mode: CadFitMode = this.opts.fitMode): void {
+    const fitBounds = this.document
+      ? resolveCadFitBounds(this.document, this.bounds, mode, this.boundsOptions())
+      : this.bounds;
+    if (!boundsValid(fitBounds)) {
       this.view = { centerX: 0, centerY: 0, scale: 1 };
       this.fitScale = 1;
       this.render();
@@ -217,13 +227,13 @@ export class CadWebGLRenderer {
     }
     const w = Math.max(1, this.cssWidth);
     const h = Math.max(1, this.cssHeight);
-    const bw = Math.max(this.bounds.maxX - this.bounds.minX, 1e-9);
-    const bh = Math.max(this.bounds.maxY - this.bounds.minY, 1e-9);
+    const bw = Math.max(fitBounds.maxX - fitBounds.minX, 1e-9);
+    const bh = Math.max(fitBounds.maxY - fitBounds.minY, 1e-9);
     const scale = this.clampScale(Math.min(w / bw, h / bh) * padding);
     this.fitScale = scale;
     this.view = {
-      centerX: (this.bounds.minX + this.bounds.maxX) / 2,
-      centerY: (this.bounds.minY + this.bounds.maxY) / 2,
+      centerX: (fitBounds.minX + fitBounds.maxX) / 2,
+      centerY: (fitBounds.minY + fitBounds.maxY) / 2,
       scale
     };
     this.render();
@@ -556,6 +566,10 @@ export class CadWebGLRenderer {
 
   private clampScale(value: number): number {
     return Math.min(this.opts.maxScale, Math.max(this.opts.minScale, value));
+  }
+
+  private boundsOptions() {
+    return { maxInsertDepth: this.opts.maxInsertDepth, maxCurveSegments: this.opts.maxCurveSegments };
   }
 
   private disposeScene(): void {
@@ -1107,54 +1121,6 @@ function inferPrimitiveSize(batch: MutableBatch): 1 | 2 | 3 {
   if (vertices === batch.primitiveCount) return 1;
   if (vertices === batch.primitiveCount * 3) return 3;
   return 2;
-}
-
-function computeBounds(document: CadDocument, opts: Required<CanvasViewerOptions>): CadBounds {
-  const bounds = emptyBounds();
-  if (document.pages?.length) {
-    for (const page of document.pages) {
-      includePoint(bounds, { x: 0, y: 0 });
-      includePoint(bounds, { x: page.width, y: page.height });
-    }
-  }
-  const lookupBlock = (name: string | undefined): CadBlock | undefined => {
-    if (!name) return undefined;
-    return document.blocks[name] ?? document.blocks[name.toLowerCase()] ?? Object.values(document.blocks).find((block) => block.name.toLowerCase() === name.toLowerCase());
-  };
-  const includeEntityBounds = (entity: CadEntity, depth: number): void => {
-    const type = String(entity.type ?? '').toUpperCase();
-    const kind = entity.kind ?? inferEntityKind(type);
-    if (kind === 'insert') {
-      const block = lookupBlock(entity.blockName ?? entity.name);
-      if (block && depth < opts.maxInsertDepth) {
-        const matrix = matrixFromInsert(entity, block.basePoint ?? { x: 0, y: 0 });
-        for (const child of block.entities) includeEntityBounds(transformEntity(child, matrix), depth + 1);
-        return;
-      }
-    }
-    if (kind === 'line') {
-      if (isFinitePoint(entity.startPoint)) includePoint(bounds, entity.startPoint);
-      if (isFinitePoint(entity.endPoint)) includePoint(bounds, entity.endPoint);
-    } else if (kind === 'circle' || kind === 'arc') {
-      if (isFinitePoint(entity.center) && Number.isFinite(entity.radius)) includeCircle(bounds, entity.center, Number(entity.radius));
-    } else if (kind === 'polyline' || kind === 'solid' || kind === 'spline') {
-      for (const p of [...(entity.vertices ?? []), ...(entity.points ?? []), ...(entity.controlPoints ?? []), ...(entity.fitPoints ?? [])]) if (isFinitePoint(p)) includePoint(bounds, p);
-    } else if (kind === 'ellipse') {
-      if (isFinitePoint(entity.center) && isFinitePoint(entity.majorAxisEndPoint)) ellipsePoints(entity.center, entity.majorAxisEndPoint, Number(entity.axisRatio ?? 1), Number(entity.startAngle ?? 0), Number(entity.endAngle ?? Math.PI * 2), opts.maxCurveSegments).forEach((p) => includePoint(bounds, p));
-    } else if (kind === 'path') {
-      for (const command of entity.commands ?? []) for (const p of command.points) includePoint(bounds, p);
-    } else if (kind === 'hatch') {
-      for (const loop of entity.loops ?? []) {
-        for (const p of loop.vertices ?? []) includePoint(bounds, p);
-        for (const command of loop.commands ?? []) for (const p of command.points) includePoint(bounds, p);
-      }
-    } else {
-      const anchor = entityAnchor(entity);
-      if (anchor) includePoint(bounds, anchor);
-    }
-  };
-  for (const entity of document.entities) includeEntityBounds(entity, 0);
-  return paddedBounds(bounds);
 }
 
 function flattenPathCommands(commands: CadPathCommand[], segments: number): CadPoint2D[] {

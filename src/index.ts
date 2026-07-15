@@ -9,6 +9,8 @@ export type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } fro
 export { CadLoaderRegistry, createDefaultLoaderRegistry, DwgLoader, DwgWorkerClient, DxfLoader, DwfLoader, supportsDwgWorker } from './loaders';
 
 export { createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadEntity, summarizeCadDocument } from './core/entity';
+export { computeCadDocumentBounds, resolveCadFitBounds, resolveCadSavedViewBounds } from './core/bounds';
+export type { CadBoundsOptions } from './core/bounds';
 export { createCadSceneDocument } from './core/scene';
 export { applyByBlockLineTypeInheritance, createDashedCadPrimitives, createDashedCadSegments, resolveCadLinePattern, resolveCadLineTypeReference } from './core/linetype';
 export type { CadDashedPrimitives, ResolvedCadLinePattern, ResolvedCadLinePatternRun } from './core/linetype';
@@ -23,6 +25,7 @@ export type {
   CadDocument,
   CadEntity,
   CadEntityKind,
+  CadFitMode,
   CadFormat,
   CadLayer,
   CadLineType,

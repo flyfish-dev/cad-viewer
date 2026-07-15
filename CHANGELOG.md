@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.6 - 2026-07-15
+
+### Added
+
+- Added `fitMode: 'auto' | 'saved-view' | 'extents'` and `viewer.fit(mode)` so applications can choose between a meaningful saved DWG view and complete drawing extents.
+
+### Fixed
+
+- DWG files with valid geometry in widely separated coordinate clusters now open on the meaningful content inside the active saved viewport instead of collapsing the initial view into a tiny dot.
+
 ## 0.6.5
 
 ### Added

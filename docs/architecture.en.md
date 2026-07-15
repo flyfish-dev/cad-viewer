@@ -147,6 +147,8 @@ A `CadDocument` contains:
 
 For DWG, `getSourceDocument()` returns the parser-owned WCS document. `getDocument()` returns the render scene after a safe planar saved-view transform. Invalid, missing or tilted `VIEWDIR` values leave WCS coordinates unchanged and add a warning.
 
+Bounds are split into two responsibilities: full scene extents remain available for culling, inspection and `fit('extents')`, while the default automatic fit intersects entity bounds with a valid active VPORT and tightens to meaningful visible content. This keeps remote but valid coordinate clusters available without shrinking the initial sheet view into a dot.
+
 ## Renderer coverage
 
 The default WebGL renderer supports common preview geometry:
