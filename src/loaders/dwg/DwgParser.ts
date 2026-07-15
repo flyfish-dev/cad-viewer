@@ -1,6 +1,7 @@
-import { addBlock, addLayer, createCadDocument, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity';
+import { addBlock, addLayer, addLineType, createCadDocument, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity';
 import { exactArrayBuffer } from '../../core/format';
-import type { CadBlock, CadDocument, CadEntity, CadLayer, CadLoadOptions, CadLoadProgress, CadLoadResult } from '../../core/types';
+import { multiplyMatrix, rotationMatrix } from '../../core/transform';
+import type { CadBlock, CadDocument, CadEntity, CadLayer, CadLineType, CadLoadOptions, CadLoadProgress, CadLoadResult, CadPoint3D, CadSavedView, CadSceneTransform2D } from '../../core/types';
 import { readDwgVersion } from './dwgVersion';
 
 interface LibreDwgModule {
@@ -107,7 +108,11 @@ export async function createLibreDwg(wasmPath = '/wasm/'): Promise<{ module: Lib
 export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, version?: unknown, options: { keepRaw?: boolean } = {}): CadDocument {
   const record = rawDb && typeof rawDb === 'object' ? rawDb as Record<string, unknown> : {};
   const layers = extractLayers(record, options);
+  const lineTypes = extractLineTypes(record, options);
   const blocks = extractBlocks(record, options);
+  const header = normalizeHeader(record.header, version);
+  const savedViewResult = extractSavedView(record, header);
+  const savedView = savedViewResult.view;
   const rawEntities = Array.isArray(record.entities) ? record.entities : [];
   const normalizeOptions = { keepRaw: Boolean(options.keepRaw), includeUnknownProperties: Boolean(options.keepRaw) };
   const entities = rawEntities
@@ -117,21 +122,28 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
   const document = createCadDocument({
     format: 'dwg',
     sourceName,
-    header: normalizeHeader(record.header, version),
+    header,
     layers,
+    lineTypes,
     blocks,
     entities,
+    savedView,
     metadata: {
       parser: '@mlightcad/libredwg-web',
       parserMode: 'wasm',
-      version
+      version,
+      savedView
     },
-    warnings: [],
+    warnings: savedViewResult.warning ? [savedViewResult.warning] : [],
     raw: options.keepRaw ? rawDb : undefined
   });
 
   if (entities.length === 0) {
     document.warnings.push('DWG parsed successfully but no model-space entities were exposed by the converter. Check layout/paper-space content or unsupported proxy objects.');
+  }
+  const uniqueLineTypes = new Set(Object.values(lineTypes));
+  if ([...uniqueLineTypes].some((lineType) => lineType.pattern.some((element) => Number(element.elementTypeFlag ?? 0) !== 0))) {
+    document.warnings.push('Complex SHX linetype glyphs are preserved in the normalized LTYPE definition and rendered as a dash/dot approximation; embedded shape glyph fidelity is not available yet.');
   }
   return document;
 }
@@ -151,6 +163,14 @@ function normalizeDwgEntity(record: Record<string, unknown>, options: { keepRaw?
   }
   entity.colorIndex = numberOrUndefined(record.colorIndex ?? record.colorNumber ?? record.aci) ?? entity.colorIndex;
   entity.colorName = stringOrUndefined(record.colorName ?? record.color_name) ?? entity.colorName;
+  const flag = numberOrUndefined(record.flag ?? record.flags);
+  if (flag !== undefined) entity.flag = flag;
+  const type = String(record.type ?? record.entityType ?? '').toUpperCase();
+  const classicPolyline = /^(POLYLINE|POLYLINE_2D|POLYLINE2D|POLYLINE_3D|POLYLINE3D)$/.test(type);
+  if (record.isClosed === true || record.closed === true || (classicPolyline && (Number(flag ?? 0) & 1) === 1)
+    || (type === 'LWPOLYLINE' && (Number(flag ?? 0) & 0x200) === 0x200)) {
+    entity.isClosed = true;
+  }
   return entity;
 }
 
@@ -198,6 +218,154 @@ function extractLayers(rawDb: Record<string, unknown>, options: { keepRaw?: bool
     }
   }
   return result;
+}
+
+function extractLineTypes(rawDb: Record<string, unknown>, options: { keepRaw?: boolean }): Record<string, CadLineType> {
+  const result: Record<string, CadLineType> = {};
+  const tables = rawDb.tables as Record<string, unknown> | undefined;
+  const candidates = [rawDb.LTYPE, rawDb.ltype, rawDb.lineTypes, tables?.LTYPE, tables?.ltype, tables?.lineTypes];
+  for (const candidate of candidates) {
+    for (const item of expandCandidate(candidate)) {
+      const record = item as Record<string, unknown>;
+      const name = stringOrUndefined(record.name ?? record.lineTypeName ?? record.entryName);
+      if (!name) continue;
+      const rawPattern = Array.isArray(record.pattern)
+        ? record.pattern
+        : Array.isArray(record.dashes)
+          ? record.dashes
+          : [];
+      const pattern = rawPattern.flatMap((entry) => {
+        if (typeof entry === 'number') return [{ length: entry }];
+        if (!entry || typeof entry !== 'object') return [];
+        const part = entry as Record<string, unknown>;
+        const length = numberOrUndefined(part.elementLength ?? part.length ?? part.dashLength);
+        if (length === undefined) return [];
+        const convertedShapeCode = numberOrUndefined(part.elementTypeFlag);
+        const convertedTypeFlag = numberOrUndefined(part.shapeNumber);
+        // @mlightcad/libredwg-web 0.7.x maps LibreDWG's internal names in the
+        // opposite direction: complex_shapecode is DXF group 75 (shape number)
+        // and shape_flag is group 74 (element type). Restore the public DXF
+        // semantics here instead of leaking the converter mismatch downstream.
+        const hasLibreDwgPair = convertedShapeCode !== undefined && convertedTypeFlag !== undefined;
+        return [{
+          length,
+          elementTypeFlag: hasLibreDwgPair ? convertedTypeFlag : numberOrUndefined(part.typeFlag ?? part.elementTypeFlag),
+          shapeNumber: hasLibreDwgPair ? convertedShapeCode : numberOrUndefined(part.shapeCode ?? part.shapeNumber),
+          scale: numberOrUndefined(part.scale),
+          rotation: numberOrUndefined(part.rotation),
+          offsetX: numberOrUndefined(part.offsetX),
+          offsetY: numberOrUndefined(part.offsetY),
+          text: stringOrUndefined(part.text)
+        }];
+      });
+      addLineType(result, {
+        name,
+        handle: stringOrUndefined(record.handle ?? record.id),
+        description: stringOrUndefined(record.description),
+        totalPatternLength: numberOrUndefined(record.totalPatternLength ?? record.patternLength),
+        pattern,
+        raw: options.keepRaw ? record : undefined
+      });
+    }
+  }
+  return result;
+}
+
+function extractSavedView(rawDb: Record<string, unknown>, header: Record<string, unknown>): { view?: CadSavedView; warning?: string } {
+  const tables = rawDb.tables as Record<string, unknown> | undefined;
+  const vports = expandCandidate(rawDb.VPORT ?? rawDb.vports ?? tables?.VPORT ?? tables?.vports)
+    .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+  const active = vports.find((record) => String(record.name ?? '').trim().toLowerCase() === '*active');
+  const source = active ? 'vport' as const : 'header-ucs' as const;
+  const record = active ?? header;
+  const ucsOrigin = pointFromUnknown(record.ucsOrigin ?? record.UCSORG ?? header.UCSORG);
+  const ucsXAxis = pointFromUnknown(record.ucsXAxis ?? record.UCSXDIR ?? header.UCSXDIR);
+  const ucsYAxis = pointFromUnknown(record.ucsYAxis ?? record.UCSYDIR ?? header.UCSYDIR);
+  const twistAngle = numberOrUndefined(record.viewTwistAngle ?? record.twistAngle ?? record.VIEWTWIST) ?? 0;
+  const direction = pointFromUnknown(record.viewDirectionFromTarget ?? record.viewDirection ?? record.direction ?? record.VIEWDIR);
+  const hasNonWorldUcs = !isWorldUcs(ucsOrigin, ucsXAxis, ucsYAxis);
+  const hasViewData = Boolean(active)
+    || Boolean(direction)
+    || hasNonWorldUcs
+    || Math.abs(twistAngle) > 1e-12;
+  if (!hasViewData) return {};
+  const planView = isPlanViewDirection(direction);
+  const sceneTransform = planView
+    ? createSavedViewTransform(ucsOrigin, ucsXAxis, ucsYAxis, twistAngle)
+    : { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+  const view: CadSavedView = {
+    source,
+    name: stringOrUndefined(record.name),
+    handle: stringOrUndefined(record.handle),
+    center: pointFromUnknown(record.center ?? record.VIEWCTR),
+    target: pointFromUnknown(record.viewTarget ?? record.target ?? record.TARGET),
+    direction,
+    viewHeight: numberOrUndefined(record.viewHeight ?? record.height ?? record.VIEWSIZE),
+    aspectRatio: numberOrUndefined(record.aspectRatio),
+    twistAngle,
+    ucsOrigin,
+    ucsXAxis,
+    ucsYAxis,
+    sceneTransformApplied: planView,
+    sceneTransform
+  };
+  return planView
+    ? { view }
+    : {
+        view,
+        warning: 'The saved CAD view has a missing, non-finite, or tilted VIEWDIR. File Viewer kept world coordinates instead of applying an unsafe 2D UCS/PLAN rotation.'
+      };
+}
+
+function createSavedViewTransform(
+  origin: CadPoint3D | undefined,
+  rawXAxis: CadPoint3D | undefined,
+  rawYAxis: CadPoint3D | undefined,
+  twistAngle: number
+): CadSceneTransform2D {
+  const xAxis = normalizePlanAxis(rawXAxis) ?? { x: 1, y: 0 };
+  const yAxisCandidate = normalizePlanAxis(rawYAxis) ?? { x: -xAxis.y, y: xAxis.x };
+  const projection = xAxis.x * yAxisCandidate.x + xAxis.y * yAxisCandidate.y;
+  const orthogonalY = normalizePlanAxis({
+    x: yAxisCandidate.x - xAxis.x * projection,
+    y: yAxisCandidate.y - xAxis.y * projection
+  }) ?? { x: -xAxis.y, y: xAxis.x };
+  const base: CadSceneTransform2D = {
+    a: xAxis.x,
+    b: orthogonalY.x,
+    c: xAxis.y,
+    d: orthogonalY.y,
+    e: origin ? -(origin.x * xAxis.x + origin.y * xAxis.y) : 0,
+    f: origin ? -(origin.x * orthogonalY.x + origin.y * orthogonalY.y) : 0
+  };
+  return multiplyMatrix(rotationMatrix(Number.isFinite(twistAngle) ? twistAngle : 0), base);
+}
+
+function normalizePlanAxis(axis: CadPoint3D | undefined): { x: number; y: number } | undefined {
+  if (!axis || Math.abs(Number(axis.z ?? 0)) > 1e-6) return undefined;
+  const length = Math.hypot(axis.x, axis.y);
+  if (!Number.isFinite(length) || length < 1e-12) return undefined;
+  return { x: axis.x / length, y: axis.y / length };
+}
+
+function isPlanViewDirection(direction: CadPoint3D | undefined): boolean {
+  if (!direction || !Number.isFinite(direction.x) || !Number.isFinite(direction.y) || !Number.isFinite(direction.z)) return false;
+  const length = Math.hypot(direction.x, direction.y, Number(direction.z));
+  if (!Number.isFinite(length) || length < 1e-12) return false;
+  return Math.hypot(direction.x, direction.y) / length <= 1e-4
+    && Math.abs(Number(direction.z)) / length >= 1 - 1e-8;
+}
+
+function isWorldUcs(
+  origin: CadPoint3D | undefined,
+  xAxis: CadPoint3D | undefined,
+  yAxis: CadPoint3D | undefined
+): boolean {
+  const close = (value: number | undefined, expected: number) => Number.isFinite(value) && Math.abs(Number(value) - expected) <= 1e-10;
+  const originWorld = !origin || (close(origin.x, 0) && close(origin.y, 0) && close(origin.z ?? 0, 0));
+  const xWorld = !xAxis || (close(xAxis.x, 1) && close(xAxis.y, 0) && close(xAxis.z ?? 0, 0));
+  const yWorld = !yAxis || (close(yAxis.x, 0) && close(yAxis.y, 1) && close(yAxis.z ?? 0, 0));
+  return originWorld && xWorld && yWorld;
 }
 
 function extractBlocks(rawDb: Record<string, unknown>, options: { keepRaw?: boolean }): Record<string, CadBlock> {

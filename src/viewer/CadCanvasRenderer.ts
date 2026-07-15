@@ -1,6 +1,8 @@
 import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor, type CadColorContrastMode } from '../core/color';
 import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includeCircle, includePoint, isFinitePoint, paddedBounds, stripMTextFormatting, xy } from '../core/geometry';
-import { inferEntityKind } from '../core/entity';
+import { inferEntityKind, isCadPolylineClosed } from '../core/entity';
+import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern } from '../core/linetype';
+import { createCadSceneDocument } from '../core/scene';
 import { matrixFromInsert, transformEntity } from '../core/transform';
 import type { CadBlock, CadBounds, CadDocument, CadEntity, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
 
@@ -101,6 +103,7 @@ export class CadCanvasRenderer {
   readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly opts: Required<CanvasViewerOptions>;
+  private sourceDocument?: CadDocument;
   private document?: CadDocument;
   private bounds: CadBounds = emptyBounds();
   private view: ViewState = { centerX: 0, centerY: 0, scale: 1 };
@@ -135,6 +138,7 @@ export class CadCanvasRenderer {
   }
 
   clear(): void {
+    this.sourceDocument = undefined;
     this.document = undefined;
     this.bounds = emptyBounds();
     this.view = { centerX: 0, centerY: 0, scale: 1 };
@@ -144,14 +148,17 @@ export class CadCanvasRenderer {
   }
 
   setDocument(document: CadDocument): void {
-    this.document = document;
-    this.bounds = this.computeBounds(document);
+    this.sourceDocument = document;
+    this.document = createCadSceneDocument(document);
+    this.bounds = this.computeBounds(this.document);
     this.fitToView();
   }
 
   getDocument(): CadDocument | undefined {
     return this.document;
   }
+
+  getSourceDocument(): CadDocument | undefined { return this.sourceDocument; }
 
   setOptions(options: CanvasViewerOptions): void {
     Object.assign(this.opts, options);
@@ -353,7 +360,7 @@ export class CadCanvasRenderer {
     }
   }
 
-  private beginStyledPath(entity: CadEntity, fill = false): void {
+  private beginStyledPath(entity: CadEntity, fill = false, applyLinePattern = true): void {
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -366,6 +373,10 @@ export class CadCanvasRenderer {
     ctx.lineJoin = 'round';
     const lw = typeof entity.lineweight === 'number' && entity.lineweight > 0 ? entity.lineweight : 0;
     ctx.lineWidth = Math.max(1, Math.min(12, lw > 0 ? lw / 30 : 1));
+    const linePattern = applyLinePattern ? resolveCadLinePattern(entity, this.document) : undefined;
+    ctx.setLineDash(linePattern
+      ? linePattern.segments.map((length) => Math.max(0.05, length * this.view.scale))
+      : []);
     ctx.beginPath();
   }
 
@@ -376,22 +387,14 @@ export class CadCanvasRenderer {
     const start = e.startPoint;
     const end = e.endPoint;
     if (!isFinitePoint(start) || !isFinitePoint(end)) return this.markSkipped('LINE');
-    const a = this.worldToScreen(start);
-    const b = this.worldToScreen(end);
-    this.beginStyledPath(e);
-    this.ctx.moveTo(a.x, a.y);
-    this.ctx.lineTo(b.x, b.y);
-    this.finishStroke();
+    this.strokeWorldPolyline(e, [start, end], false);
   }
 
   private drawCircle(e: CadEntity): void {
     const center = e.center;
     const radius = Number(e.radius);
     if (!isFinitePoint(center) || !Number.isFinite(radius)) return this.markSkipped('CIRCLE');
-    const c = this.worldToScreen(center);
-    this.beginStyledPath(e);
-    this.ctx.arc(c.x, c.y, Math.abs(radius) * this.view.scale, 0, Math.PI * 2);
-    this.finishStroke();
+    this.strokeWorldPolyline(e, arcPoints(xy(center), radius, 0, Math.PI * 2, true), true);
   }
 
   private drawArc(e: CadEntity): void {
@@ -406,7 +409,7 @@ export class CadCanvasRenderer {
   private drawPolyline(e: CadEntity): void {
     const vertices = (e.vertices ?? e.points) as Array<CadPoint3D & { bulge?: number }> | undefined;
     if (!Array.isArray(vertices) || vertices.length < 2) return this.markSkipped(String(e.type));
-    const closed = Boolean(e.isClosed) || (Number(e.flag) & 1) === 1;
+    const closed = isCadPolylineClosed(e);
     const pts: CadPoint2D[] = [];
     const pairs = closed ? vertices.length : vertices.length - 1;
     for (let i = 0; i < pairs; i++) {
@@ -455,7 +458,8 @@ export class CadCanvasRenderer {
     if (block && depth < this.opts.maxInsertDepth) {
       const matrix = matrixFromInsert(e, block.basePoint ?? { x: 0, y: 0 });
       for (const child of block.entities) {
-        const inherited = applyByBlockColorInheritance(child, e, this.document, { foreground: this.opts.foreground, background: this.opts.background, trueColorByteOrder: this.opts.trueColorByteOrder, contrastMode: this.opts.contrastMode, minColorContrast: this.opts.minColorContrast });
+        const inheritedColor = applyByBlockColorInheritance(child, e, this.document, { foreground: this.opts.foreground, background: this.opts.background, trueColorByteOrder: this.opts.trueColorByteOrder, contrastMode: this.opts.contrastMode, minColorContrast: this.opts.minColorContrast });
+        const inherited = applyByBlockLineTypeInheritance(inheritedColor, e, this.document);
         this.drawEntityTracked(transformEntity(inherited, matrix), depth + 1);
       }
       return;
@@ -610,6 +614,33 @@ export class CadCanvasRenderer {
   private strokeWorldPolyline(e: CadEntity, points: CadPoint2D[], closed: boolean): void {
     const valid = points.filter(isFinitePoint);
     if (valid.length < 2) return this.markSkipped(String(e.type));
+    const pattern = resolveCadLinePattern(e, this.document);
+    if (pattern) {
+      const primitives = createDashedCadPrimitives(valid, closed, pattern);
+      this.beginStyledPath(e, false, false);
+      for (const [start, end] of primitives.segments) {
+        const a = this.worldToScreen(start);
+        const b = this.worldToScreen(end);
+        this.ctx.moveTo(a.x, a.y);
+        this.ctx.lineTo(b.x, b.y);
+      }
+      this.ctx.stroke();
+      if (primitives.dots.length > 0) {
+        this.ctx.setLineDash([]);
+        this.ctx.beginPath();
+        const radius = Math.max(0.5, this.ctx.lineWidth / 2);
+        for (const point of primitives.dots) {
+          const screen = this.worldToScreen(point);
+          this.ctx.moveTo(screen.x + radius, screen.y);
+          this.ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+        }
+        this.ctx.fillStyle = this.ctx.strokeStyle;
+        this.ctx.fill();
+      }
+      this.ctx.restore();
+      this.stats.drawn++;
+      return;
+    }
     this.beginStyledPath(e);
     const first = this.worldToScreen(valid[0]);
     this.ctx.moveTo(first.x, first.y);

@@ -8,7 +8,11 @@ export type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } fro
 
 export { CadLoaderRegistry, createDefaultLoaderRegistry, DwgLoader, DwgWorkerClient, DxfLoader, DwfLoader, supportsDwgWorker } from './loaders';
 
-export { createCadDocument, inferEntityKind, normalizeCadEntity, summarizeCadDocument } from './core/entity';
+export { createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadEntity, summarizeCadDocument } from './core/entity';
+export { createCadSceneDocument } from './core/scene';
+export { applyByBlockLineTypeInheritance, createDashedCadPrimitives, createDashedCadSegments, resolveCadLinePattern, resolveCadLineTypeReference } from './core/linetype';
+export type { CadDashedPrimitives, ResolvedCadLinePattern, ResolvedCadLinePatternRun } from './core/linetype';
+export { normalizeDwgDatabase } from './loaders/dwg/DwgParser';
 export { detectCadFormat, readInputBytes } from './core/format';
 export { isCadNativeRenderableLoader } from './core/types';
 export { colorFromAci, colorFromTrueColor, resolveCadColor } from './core/color';
@@ -21,6 +25,8 @@ export type {
   CadEntityKind,
   CadFormat,
   CadLayer,
+  CadLineType,
+  CadLineTypeElement,
   CadLoadInput,
   CadLoadOptions,
   CadLoadProgress,
@@ -33,5 +39,7 @@ export type {
   CadPoint,
   CadPoint2D,
   CadPoint3D,
+  CadSavedView,
+  CadSceneTransform2D,
   CadSummary
 } from './core/types';

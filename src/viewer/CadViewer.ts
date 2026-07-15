@@ -171,6 +171,7 @@ export class CadViewer {
 
   getLoadResult(): CadViewerLoadResult | undefined { return this.lastResult; }
   getDocument(): CadDocument | undefined { return this.activeNativeLoader ? this.lastResult?.document : this.renderer.getDocument(); }
+  getSourceDocument(): CadDocument | undefined { return this.activeNativeLoader ? this.lastResult?.document : this.renderer.getSourceDocument(); }
   getZoomPercent(): number { return this.activeNativeLoader ? 100 : this.renderer.getZoomPercent(); }
   isNativeRendererActive(): boolean { return Boolean(this.activeNativeLoader); }
 

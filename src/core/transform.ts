@@ -63,7 +63,7 @@ export function matrixFromInsert(entity: CadEntity, basePoint: CadPoint3D = { x:
 }
 
 export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity {
-  const clone: CadEntity = { ...entity, raw: entity.raw ?? entity };
+  const clone: CadEntity = { ...entity };
   if (entity.startPoint) clone.startPoint = transformPoint(entity.startPoint, matrix);
   if (entity.endPoint) clone.endPoint = transformPoint(entity.endPoint, matrix);
   if (entity.center) clone.center = transformPoint(entity.center, matrix);
@@ -77,6 +77,7 @@ export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity 
   if (entity.points) clone.points = entity.points.map((p) => transformPoint(p, matrix));
   if (entity.controlPoints) clone.controlPoints = entity.controlPoints.map((p) => transformPoint(p, matrix));
   if (entity.fitPoints) clone.fitPoints = entity.fitPoints.map((p) => transformPoint(p, matrix));
+  if (entity.attribs) clone.attribs = entity.attribs.map((attribute) => transformEntity(attribute, matrix));
   if (entity.commands) clone.commands = transformPathCommands(entity.commands, matrix);
   if (entity.loops) {
     clone.loops = entity.loops.map((loop) => ({
@@ -88,6 +89,20 @@ export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity 
 
   const scaleApprox = Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
   if (typeof entity.radius === 'number' && Number.isFinite(scaleApprox)) clone.radius = entity.radius * scaleApprox;
+  const rotation = Math.atan2(matrix.b, matrix.a);
+  const ellipseAnglesAreRelative = entity.kind === 'ellipse' || String(entity.type ?? '').toUpperCase() === 'ELLIPSE';
+  if (Number.isFinite(rotation) && Math.abs(rotation) > 1e-14) {
+    if (typeof entity.rotation === 'number' || entity.kind === 'text' || entity.kind === 'insert') {
+      clone.rotation = Number(entity.rotation ?? 0) + rotation;
+    }
+    // ARC angles are WCS angles and rotate with the scene. ELLIPSE start/end
+    // parameters are relative to majorAxisEndPoint, which was already rotated.
+    if (!ellipseAnglesAreRelative && typeof entity.startAngle === 'number') clone.startAngle = entity.startAngle + rotation;
+    if (!ellipseAnglesAreRelative && typeof entity.endAngle === 'number') clone.endAngle = entity.endAngle + rotation;
+  }
+  if (matrix.a * matrix.d - matrix.b * matrix.c < 0 && clone.vertices) {
+    clone.vertices = clone.vertices.map((point) => ({ ...point, bulge: typeof point.bulge === 'number' ? -point.bulge : undefined }));
+  }
   return clone;
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@flyfish-dev/cad-viewer",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "A production-oriented lightweight frontend CAD viewer for DWG, DXF, DWF, DWFx and XPS, built with TypeScript, worker-backed DWG WebAssembly parsing, native dwf-viewer integration, WebGL 2D/3D rendering and Canvas overlays.",
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -81,6 +81,7 @@
     "copy:worker": "node ./scripts/copy-worker-asset.cjs",
     "dev": "npm run copy:wasm && npm run build:worker && npm run copy:worker && vite --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:regression": "npm run build:lib && node --test test/*.test.mjs",
     "build:types": "tsc -p tsconfig.build.json",
     "build:worker": "vite build --config vite.worker.config.ts",
     "build:lib": "npm run copy:wasm && vite build --config vite.lib.config.ts && npm run build:worker && npm run build:types && npm run build:assets",

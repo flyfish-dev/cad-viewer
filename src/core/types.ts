@@ -32,6 +32,54 @@ export interface CadLayer {
   raw?: unknown;
 }
 
+export interface CadLineTypeElement {
+  /** Signed AutoCAD pattern length: positive=dash, negative=gap, zero=dot/shape. */
+  length: number;
+  elementTypeFlag?: number;
+  shapeNumber?: number;
+  scale?: number;
+  rotation?: number;
+  offsetX?: number;
+  offsetY?: number;
+  text?: string;
+}
+
+export interface CadLineType {
+  name: string;
+  handle?: string;
+  description?: string;
+  totalPatternLength?: number;
+  pattern: CadLineTypeElement[];
+  raw?: unknown;
+}
+
+export interface CadSceneTransform2D {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+}
+
+export interface CadSavedView {
+  source: 'vport' | 'header-ucs';
+  name?: string;
+  handle?: string;
+  center?: CadPoint2D;
+  target?: CadPoint3D;
+  direction?: CadPoint3D;
+  viewHeight?: number;
+  aspectRatio?: number;
+  twistAngle: number;
+  ucsOrigin?: CadPoint3D;
+  ucsXAxis?: CadPoint3D;
+  ucsYAxis?: CadPoint3D;
+  sceneTransformApplied: boolean;
+  /** WCS-to-normalized-scene transform used by render, bounds and interaction. */
+  sceneTransform: CadSceneTransform2D;
+}
+
 export interface CadPathCommand {
   cmd: 'M' | 'L' | 'C' | 'Q' | 'Z';
   points: CadPoint2D[];
@@ -71,6 +119,7 @@ export interface CadEntity {
   lineweight?: number;
   lineType?: string;
   linetype?: string;
+  lineTypeScale?: number;
   isVisible?: boolean;
   isInPaperSpace?: boolean;
 
@@ -134,9 +183,11 @@ export interface CadDocument {
   units?: string;
   header?: Record<string, unknown>;
   layers: Record<string, CadLayer>;
+  lineTypes?: Record<string, CadLineType>;
   blocks: Record<string, CadBlock>;
   entities: CadEntity[];
   pages?: CadPage[];
+  savedView?: CadSavedView;
   metadata: Record<string, unknown>;
   warnings: string[];
   raw?: unknown;

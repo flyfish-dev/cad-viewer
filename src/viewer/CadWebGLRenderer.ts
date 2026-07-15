@@ -1,6 +1,8 @@
 import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor } from '../core/color';
 import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includeCircle, includePoint, isFinitePoint, paddedBounds, stripMTextFormatting, xy } from '../core/geometry';
-import { inferEntityKind } from '../core/entity';
+import { inferEntityKind, isCadPolylineClosed } from '../core/entity';
+import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern } from '../core/linetype';
+import { createCadSceneDocument } from '../core/scene';
 import { matrixFromInsert, transformEntity } from '../core/transform';
 import type { CadBlock, CadBounds, CadDocument, CadEntity, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
 import type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './CadCanvasRenderer';
@@ -50,6 +52,7 @@ interface CpuScene {
   origin: CadPoint2D;
   lineBatches: CpuBatch[];
   triangleBatches: CpuBatch[];
+  lineTypePointBatches: CpuBatch[];
   pointBatches: CpuBatch[];
   textItems: TextItem[];
   imageItems: ImageItem[];
@@ -62,6 +65,7 @@ interface GpuScene {
   origin: CadPoint2D;
   lineBatches: GpuBatch[];
   triangleBatches: GpuBatch[];
+  lineTypePointBatches: GpuBatch[];
   pointBatches: GpuBatch[];
   textItems: TextItem[];
   imageItems: ImageItem[];
@@ -113,6 +117,7 @@ export class CadWebGLRenderer {
   private readonly eventController = new AbortController();
   private readonly imageCache = new Map<string, HTMLImageElement>();
   private opts: Required<CanvasViewerOptions>;
+  private sourceDocument?: CadDocument;
   private document?: CadDocument;
   private bounds: CadBounds = emptyBounds();
   private view: ViewState = { centerX: 0, centerY: 0, scale: 1 };
@@ -160,6 +165,7 @@ export class CadWebGLRenderer {
   }
 
   clear(): void {
+    this.sourceDocument = undefined;
     this.document = undefined;
     this.bounds = emptyBounds();
     this.view = { centerX: 0, centerY: 0, scale: 1 };
@@ -170,10 +176,11 @@ export class CadWebGLRenderer {
   }
 
   setDocument(document: CadDocument): void {
-    this.document = document;
-    this.bounds = computeBounds(document, this.opts);
+    this.sourceDocument = document;
+    this.document = createCadSceneDocument(document);
+    this.bounds = computeBounds(this.document, this.opts);
     this.disposeScene();
-    const cpuScene = buildCpuScene(document, this.opts, this.bounds);
+    const cpuScene = buildCpuScene(this.document, this.opts, this.bounds);
     this.scene = uploadScene(this.gl, cpuScene);
     this.stats = createStatsFromScene(this.scene, 0);
     this.fitToView();
@@ -183,11 +190,13 @@ export class CadWebGLRenderer {
     return this.document;
   }
 
+  getSourceDocument(): CadDocument | undefined { return this.sourceDocument; }
+
   setOptions(options: CanvasViewerOptions): void {
     const rebuildRequired = requiresSceneRebuild(this.opts, options);
     this.opts = { ...this.opts, ...options };
-    if (rebuildRequired && this.document) {
-      this.setDocument(this.document);
+    if (rebuildRequired && (this.sourceDocument ?? this.document)) {
+      this.setDocument(this.sourceDocument ?? this.document!);
       return;
     }
     this.render();
@@ -309,13 +318,17 @@ export class CadWebGLRenderer {
       gl.uniform2f(this.program.uViewCenter, this.view.centerX - scene.origin.x, this.view.centerY - scene.origin.y);
       gl.uniform1f(this.program.uScale, this.view.scale * this.dpr);
       gl.uniform2f(this.program.uViewport, this.canvas.width, this.canvas.height);
-      gl.uniform1f(this.program.uPointSize, Math.max(2, Math.min(12, 4 * this.dpr)));
+      gl.uniform1f(this.program.uPointSize, Math.max(1, this.dpr));
       const lineCounts = this.drawBatches(scene.lineBatches, gl.LINES, visibleBounds);
       visiblePrimitiveCount += lineCounts.visible;
       culledPrimitiveCount += lineCounts.culled;
       const triangleCounts = this.drawBatches(scene.triangleBatches, gl.TRIANGLES, visibleBounds);
       visiblePrimitiveCount += triangleCounts.visible;
       culledPrimitiveCount += triangleCounts.culled;
+      const lineTypePointCounts = this.drawBatches(scene.lineTypePointBatches, gl.POINTS, visibleBounds);
+      visiblePrimitiveCount += lineTypePointCounts.visible;
+      culledPrimitiveCount += lineTypePointCounts.culled;
+      gl.uniform1f(this.program.uPointSize, Math.max(2, Math.min(12, 4 * this.dpr)));
       const pointCounts = this.drawBatches(scene.pointBatches, gl.POINTS, visibleBounds);
       visiblePrimitiveCount += pointCounts.visible;
       culledPrimitiveCount += pointCounts.culled;
@@ -548,7 +561,7 @@ export class CadWebGLRenderer {
   private disposeScene(): void {
     if (!this.scene) return;
     const gl = this.gl;
-    for (const batch of [...this.scene.lineBatches, ...this.scene.triangleBatches, ...this.scene.pointBatches]) {
+    for (const batch of [...this.scene.lineBatches, ...this.scene.triangleBatches, ...this.scene.lineTypePointBatches, ...this.scene.pointBatches]) {
       gl.deleteBuffer(batch.positionBuffer);
       gl.deleteBuffer(batch.colorBuffer);
     }
@@ -675,11 +688,13 @@ function uploadScene(gl: GL, cpu: CpuScene): GpuScene {
   });
   const lineBatches = upload(cpu.lineBatches);
   const triangleBatches = upload(cpu.triangleBatches);
+  const lineTypePointBatches = upload(cpu.lineTypePointBatches);
   const pointBatches = upload(cpu.pointBatches);
   return {
     origin: cpu.origin,
     lineBatches,
     triangleBatches,
+    lineTypePointBatches,
     pointBatches,
     textItems: cpu.textItems,
     imageItems: cpu.imageItems,
@@ -713,6 +728,7 @@ function buildCpuScene(document: CadDocument, opts: Required<CanvasViewerOptions
 class CpuSceneBuilder {
   private readonly lineBuckets = new Map<string, MutableBatch>();
   private readonly triangleBuckets = new Map<string, MutableBatch>();
+  private readonly lineTypePointBuckets = new Map<string, MutableBatch>();
   private readonly pointBuckets = new Map<string, MutableBatch>();
   private readonly textItems: TextItem[] = [];
   private readonly imageItems: ImageItem[] = [];
@@ -742,12 +758,14 @@ class CpuSceneBuilder {
   finalize(): CpuScene {
     const lineBatches = finalizeMutableBatches(this.lineBuckets, this.maxVerticesPerBatch);
     const triangleBatches = finalizeMutableBatches(this.triangleBuckets, this.maxVerticesPerBatch);
+    const lineTypePointBatches = finalizeMutableBatches(this.lineTypePointBuckets, this.maxVerticesPerBatch);
     const pointBatches = finalizeMutableBatches(this.pointBuckets, this.maxVerticesPerBatch);
     this.stats.primitiveCount = this.primitiveCount;
     return {
       origin: this.origin,
       lineBatches,
       triangleBatches,
+      lineTypePointBatches,
       pointBatches,
       textItems: this.textItems,
       imageItems: this.imageItems,
@@ -783,7 +801,7 @@ class CpuSceneBuilder {
 
   private addLineEntity(e: CadEntity): void {
     if (!isFinitePoint(e.startPoint) || !isFinitePoint(e.endPoint)) return this.markSkipped('LINE');
-    this.addSegment(e.startPoint, e.endPoint, this.strokeBytes(e));
+    this.addPolyline([e.startPoint, e.endPoint], false, this.strokeBytes(e), e);
     this.stats.drawn++;
   }
 
@@ -793,7 +811,7 @@ class CpuSceneBuilder {
     if (!isFinitePoint(center) || !Number.isFinite(radius)) return this.markSkipped('CIRCLE');
     const segments = Math.max(16, Math.min(this.opts.maxCurveSegments, Math.ceil(Math.sqrt(Math.abs(radius)) * 12)));
     const pts = arcPoints(center, radius, 0, Math.PI * 2, true, segments);
-    this.addPolyline(pts, true, this.strokeBytes(e));
+    this.addPolyline(pts, true, this.strokeBytes(e), e);
     this.stats.drawn++;
   }
 
@@ -803,14 +821,14 @@ class CpuSceneBuilder {
     const startAngle = Number(e.startAngle);
     const endAngle = Number(e.endAngle);
     if (!isFinitePoint(center) || !Number.isFinite(radius) || !Number.isFinite(startAngle) || !Number.isFinite(endAngle)) return this.markSkipped('ARC');
-    this.addPolyline(arcPoints(center, radius, startAngle, endAngle, true, this.opts.maxCurveSegments), false, this.strokeBytes(e));
+    this.addPolyline(arcPoints(center, radius, startAngle, endAngle, true, this.opts.maxCurveSegments), false, this.strokeBytes(e), e);
     this.stats.drawn++;
   }
 
   private addPolylineEntity(e: CadEntity): void {
     const vertices = (e.vertices ?? e.points) as Array<CadPoint3D & { bulge?: number }> | undefined;
     if (!Array.isArray(vertices) || vertices.length < 2) return this.markSkipped(String(e.type));
-    const closed = Boolean(e.isClosed) || (Number(e.flag) & 1) === 1;
+    const closed = isCadPolylineClosed(e);
     const pts: CadPoint2D[] = [];
     const pairs = closed ? vertices.length : vertices.length - 1;
     for (let i = 0; i < pairs; i++) {
@@ -822,7 +840,7 @@ class CpuSceneBuilder {
       pts.push(...segment);
     }
     if (pts.length < 2) return this.markSkipped(String(e.type));
-    this.addPolyline(pts, closed, this.strokeBytes(e));
+    this.addPolyline(pts, closed, this.strokeBytes(e), e);
     this.stats.drawn++;
   }
 
@@ -830,7 +848,7 @@ class CpuSceneBuilder {
     if (!isFinitePoint(e.center) || !isFinitePoint(e.majorAxisEndPoint)) return this.markSkipped('ELLIPSE');
     const pts = ellipsePoints(e.center, e.majorAxisEndPoint, Number(e.axisRatio ?? 1), Number(e.startAngle ?? 0), Number(e.endAngle ?? Math.PI * 2), this.opts.maxCurveSegments);
     const closed = Math.abs(Number(e.endAngle ?? Math.PI * 2) - Number(e.startAngle ?? 0)) >= Math.PI * 2 - 1e-6;
-    this.addPolyline(pts, closed, this.strokeBytes(e));
+    this.addPolyline(pts, closed, this.strokeBytes(e), e);
     this.stats.drawn++;
   }
 
@@ -866,7 +884,8 @@ class CpuSceneBuilder {
     if (block && depth < this.opts.maxInsertDepth) {
       const matrix = matrixFromInsert(e, block.basePoint ?? { x: 0, y: 0 });
       for (const child of block.entities) {
-        const inherited = applyByBlockColorInheritance(child, e, this.document, this.colorOptions());
+        const inheritedColor = applyByBlockColorInheritance(child, e, this.document, this.colorOptions());
+        const inherited = applyByBlockLineTypeInheritance(inheritedColor, e, this.document);
         this.addEntityTracked(transformEntity(inherited, matrix), depth + 1);
       }
       return;
@@ -885,7 +904,7 @@ class CpuSceneBuilder {
     if (points.length < 3) return this.markSkipped(String(e.type));
     const fill = this.fillBytes(e) ?? this.strokeBytes(e);
     this.addTriangleFan(points, fill);
-    this.addPolyline(points, true, this.strokeBytes(e));
+    this.addPolyline(points, true, this.strokeBytes(e), e);
     this.stats.drawn++;
   }
 
@@ -898,7 +917,7 @@ class CpuSceneBuilder {
     for (const loop of loops) {
       const points = loop.commands?.length ? flattenPathCommands(loop.commands, this.opts.maxCurveSegments) : (loop.vertices ?? []).filter(isFinitePoint).map(xy);
       if (points.length < 2) continue;
-      this.addPolyline(points, true, stroke);
+      this.addPolyline(points, true, stroke, e);
       if (fill && points.length >= 3) this.addTriangleFan(points, fill);
       added = true;
     }
@@ -909,7 +928,7 @@ class CpuSceneBuilder {
   private addSplineEntity(e: CadEntity): void {
     const points = e.fitPoints?.length ? e.fitPoints : e.controlPoints;
     if (!points || points.length < 2) return this.markSkipped('SPLINE');
-    this.addPolyline(points.filter(isFinitePoint).map(xy), Boolean(e.isClosed), this.strokeBytes(e));
+    this.addPolyline(points.filter(isFinitePoint).map(xy), Boolean(e.isClosed), this.strokeBytes(e), e);
     this.stats.drawn++;
   }
 
@@ -917,7 +936,7 @@ class CpuSceneBuilder {
     if (!e.commands?.length) return this.markSkipped(String(e.type));
     const points = flattenPathCommands(e.commands, this.opts.maxCurveSegments);
     if (points.length < 2) return this.markSkipped(String(e.type));
-    this.addPolyline(points, false, this.strokeBytes(e));
+    this.addPolyline(points, false, this.strokeBytes(e), e);
     const fill = this.fillBytes(e);
     if (fill && points.length >= 3) this.addTriangleFan(points, fill);
     this.stats.drawn++;
@@ -941,9 +960,16 @@ class CpuSceneBuilder {
     this.addPoint(p, this.strokeBytes(e));
   }
 
-  private addPolyline(points: CadPoint2D[], closed: boolean, color: RgbaBytes): void {
+  private addPolyline(points: CadPoint2D[], closed: boolean, color: RgbaBytes, entity?: CadEntity): void {
     const valid = points.filter(isFinitePoint).map(xy);
     if (valid.length < 2) return;
+    const pattern = entity ? resolveCadLinePattern(entity, this.document) : undefined;
+    if (pattern) {
+      const primitives = createDashedCadPrimitives(valid, closed, pattern);
+      for (const [start, end] of primitives.segments) this.addSegment(start, end, color);
+      for (const point of primitives.dots) this.addLineTypePoint(point, color);
+      return;
+    }
     for (let i = 0; i < valid.length - 1; i++) this.addSegment(valid[i], valid[i + 1], color);
     if (closed) this.addSegment(valid[valid.length - 1], valid[0], color);
   }
@@ -960,6 +986,13 @@ class CpuSceneBuilder {
 
   private addPoint(p: CadPoint2D, color: RgbaBytes): void {
     const bucket = this.batchFor(this.pointBuckets, pointBounds(p));
+    pushVertex(bucket, p, color, this.origin);
+    bucket.primitiveCount++;
+    this.primitiveCount++;
+  }
+
+  private addLineTypePoint(p: CadPoint2D, color: RgbaBytes): void {
+    const bucket = this.batchFor(this.lineTypePointBuckets, pointBounds(p));
     pushVertex(bucket, p, color, this.origin);
     bucket.primitiveCount++;
     this.primitiveCount++;

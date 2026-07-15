@@ -1,4 +1,4 @@
-import type { CadBlock, CadDocument, CadEntity, CadEntityKind, CadLayer, CadPage, CadPoint3D } from './types';
+import type { CadBlock, CadDocument, CadEntity, CadEntityKind, CadLayer, CadLineType, CadPage, CadPoint3D } from './types';
 
 export interface NormalizeCadEntityOptions {
   /** Preserve the parser-owned raw object on entity.raw. This can be very large and may not be structured-clone safe. */
@@ -16,9 +16,11 @@ export function createCadDocument(init: Partial<CadDocument> & Pick<CadDocument,
     units: init.units,
     header: init.header ?? {},
     layers: init.layers ?? {},
+    lineTypes: init.lineTypes ?? {},
     blocks: init.blocks ?? {},
     entities: init.entities ?? [],
     pages: init.pages,
+    savedView: init.savedView,
     metadata: init.metadata ?? {},
     warnings: init.warnings ?? [],
     raw: init.raw
@@ -72,6 +74,16 @@ export function normalizeCadEntity(raw: Record<string, unknown>, forcedType?: st
   entity.handle = stringOrUndefined(raw.handle ?? raw.id);
   entity.layer = stringOrUndefined(raw.layer ?? raw.layerName);
   entity.lineType = stringOrUndefined(raw.lineType ?? raw.linetype);
+  entity.lineTypeScale = numberOrUndefined(raw.lineTypeScale ?? raw.linetypeScale ?? raw.ltscale) ?? entity.lineTypeScale;
+  entity.flag = numberOrUndefined(raw.flag ?? raw.flags) ?? entity.flag;
+  const explicitClosed = raw.isClosed === true || raw.closed === true || raw.shape === true;
+  const typeUsesClassicPolylineFlag = /^(POLYLINE|POLYLINE_2D|POLYLINE2D|POLYLINE_3D|POLYLINE3D|SPLINE)$/.test(type);
+  const typeUsesLwPolylineFlag = type === 'LWPOLYLINE';
+  if (explicitClosed
+    || (typeUsesClassicPolylineFlag && (Number(entity.flag ?? 0) & 1) === 1)
+    || (typeUsesLwPolylineFlag && (Number(entity.flag ?? 0) & 0x200) === 0x200)) {
+    entity.isClosed = true;
+  }
 
   const numericColorMode = options.numericColorMode ?? 'auto';
   const rawColorNumber = numberOrUndefined(raw.color);
@@ -111,6 +123,12 @@ export function normalizeCadEntity(raw: Record<string, unknown>, forcedType?: st
   if (controlPoints.length > 0) entity.controlPoints = controlPoints;
   const fitPoints = normalizePoints(raw.fitPoints ?? raw.fit_points);
   if (fitPoints.length > 0) entity.fitPoints = fitPoints;
+  const rawAttribs = raw.attribs ?? raw.attributes;
+  if (Array.isArray(rawAttribs)) {
+    entity.attribs = rawAttribs
+      .filter((attribute): attribute is Record<string, unknown> => !!attribute && typeof attribute === 'object')
+      .map((attribute) => normalizeCadEntity(attribute, undefined, options));
+  }
   return entity;
 }
 
@@ -162,6 +180,15 @@ export function summarizeCadDocument(document: CadDocument) {
   };
 }
 
+export function isCadPolylineClosed(entity: CadEntity): boolean {
+  if (entity.isClosed === true) return true;
+  const type = String(entity.type ?? '').toUpperCase();
+  const flag = Number(entity.flag ?? 0);
+  if (type === 'LWPOLYLINE') return (flag & 0x200) === 0x200;
+  if (/^(POLYLINE|POLYLINE_2D|POLYLINE2D|POLYLINE_3D|POLYLINE3D)$/.test(type)) return (flag & 1) === 1;
+  return false;
+}
+
 export function addLayer(target: Record<string, CadLayer>, layer: CadLayer): void {
   if (!layer.name) return;
   target[layer.name] = layer;
@@ -172,6 +199,16 @@ export function addBlock(target: Record<string, CadBlock>, block: CadBlock): voi
   if (!block.name) return;
   target[block.name] = block;
   target[block.name.toLowerCase()] = block;
+}
+
+export function addLineType(target: Record<string, CadLineType>, lineType: CadLineType): void {
+  if (!lineType.name) return;
+  target[lineType.name] = lineType;
+  target[lineType.name.toLowerCase()] = lineType;
+  if (lineType.handle) {
+    target[lineType.handle] = lineType;
+    target[lineType.handle.toLowerCase()] = lineType;
+  }
 }
 
 export function flattenPages(pages: CadPage[] | undefined): CadEntity[] {
