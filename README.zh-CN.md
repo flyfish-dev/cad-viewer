@@ -12,6 +12,14 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.7.0 变更
+
+- 修正 PLAN/UCS 变换后的块内 DWG 几何，包括 INSERT/文字角度归一化、闭合多段线 fallback 检测，以及常量/顶点线宽保留。
+- Worker 归一化和 INSERT 展开过程现在会保留 TEXT 宽度因子、对齐点、水平/垂直对齐及镜像 flag。
+- Canvas2D 与 retained WebGL 新增 world-space 宽多段线渲染，同时保持 dash 相位及实体/INSERT 线型缩放。
+- 增加完整的外部 SHX 引用处理：通过 metadata 暴露复杂 DWG 线型引用的文件；缺失时安全降级为 marker；补传 `File` 或 `ArrayBuffer` 后会解析、校验、缓存并按真实 shape/text 轮廓重绘，同时保持当前视图不跳变。
+- 增加 `onReferenceStateChange`、`addReferenceFile()`、`addReferenceBuffer()`、`getMissingReferences()` 等资源生命周期 API，并在 Demo 中提供按需出现的 SHX 悬浮上传入口。
+
 ## 0.6.6 变更
 
 - 新增基于有效 DWG active VPORT 内有意义几何的自动首屏拟合，避免远距离坐标簇把主图压缩成小黑点。
@@ -98,7 +106,8 @@
 - **纯前端组件**：`new CadViewer({ container })` 或 `new CadViewer({ canvas })`。
 - **正确的 loader 架构**：DWG / DXF / DWF 独立 loader，可替换、可扩展；native-renderable loader 可以挂载自己的优化渲染器。
 - **DWG 预览**：通过 LibreDWG WebAssembly 在浏览器本地解析，默认在 Web Worker 中执行。
-- **DWG 视图与线型保真**：active 平面 saved view、闭合多段线、LTYPE 表、BYLAYER/BYBLOCK 继承、dash/dot pattern 和稳定线型缩放。
+- **DWG 视图与线型保真**：active 平面 saved view、块内文字对齐和宽度、闭合/宽多段线、LTYPE 表、BYLAYER/BYBLOCK 继承、dash/dot pattern 和稳定线型缩放。
+- **外部 SHX 引用**：识别复杂线型缺失的 shape 字体，接收本地文件或 API 字节，校验必需 glyph，并在 Canvas2D/WebGL 中渲染真实 SHX shape/text 几何。
 - **DXF 预览**：JavaScript 解析，支持常见 ASCII DXF `ENTITIES`，并带 fallback parser。
 - **DWF/DWFx/XPS 预览**：由 `dwf-viewer` 支持 DWF ZIP 包、WebGL 加速 W2D 与 XPS/DWFx 2D 矢量、W3D/HSF eModel、XPS 嵌入字体、自适应 CAD 线宽和 raster fallback。
 - **CAD 颜色处理**：支持 ACI、BYLAYER、BYBLOCK 继承、DWG 图层颜色、true color、填充色、透明度和自适应对比度。
@@ -299,11 +308,16 @@ const viewer = new CadViewer({
   onLoad(result) {},
   onError(error) {},
   onRenderStats(stats) {},
-  onViewChange(event) {}
+  onViewChange(event) {},
+  onReferenceStateChange(state) {} // 外部 SHX 的 missing/loaded 状态
 });
 
 await viewer.loadFile(file);
 await viewer.loadBuffer(arrayBuffer, 'drawing.dxf');
+await viewer.addReferenceFile(shxFile);
+await viewer.addReferenceBuffer(shxArrayBuffer, 'LSG.SHX');
+viewer.getMissingReferences();      // CadMissingReference[]
+viewer.getLoadedReferences();       // CadLoadedReference[]
 viewer.fit();                       // 自动拟合有意义的首屏内容
 viewer.fit('saved-view');          // 严格恢复 DWG active viewport
 viewer.fit('extents');             // 查看全部几何，包括远距离坐标簇
@@ -316,6 +330,30 @@ viewer.getSourceDocument();      // parser 保留的原始 WCS CadDocument
 viewer.clear();
 viewer.destroy();
 ```
+
+### 外部 SHX 引用
+
+复杂 DWG 线型按文件名引用 SHX shape/font，DWG 本身不包含对应轮廓。`CadViewer` 会先用 marker 保证图纸可用，并通过 `onReferenceStateChange` 与 `document.metadata.missingReferences` 同步缺失资源。
+
+```ts
+const viewer = new CadViewer({
+  container,
+  onReferenceStateChange({ missing }) {
+    shxUploadButton.hidden = missing.length === 0;
+    shxUploadButton.textContent = missing.map(({ fileName }) => fileName).join(', ');
+  }
+});
+
+await viewer.loadFile(dwgFile);
+
+// 用户选择的本地文件。
+await viewer.addReferenceFile(shxFile);
+
+// 或由业务 API 提供文件内容；fileName 必须保留图纸引用的名称。
+await viewer.addReferenceBuffer(shxBytes, 'LSG.SHX');
+```
+
+引用可以在图纸加载前或加载后传入。解析后的字体会跨图纸缓存，直到调用 `removeReference()`、`clearReferences()` 或 `destroy()`。替换引用时会校验当前图纸需要的 glyph；同名但不兼容的文件仍会保持 missing 状态。整个过程只在浏览器本地完成。
 
 ## Loader 架构
 
@@ -377,7 +415,7 @@ viewer.registerLoader({
 
 | 格式 | Loader | 支持范围 |
 |---|---|---|
-| DWG | `DwgLoader` | 使用 LibreDWG WebAssembly。保留 active 平面 saved view、闭合多段线和 LTYPE 定义；Canvas2D/WebGL 支持 dash/dot 与 BYLAYER/BYBLOCK 继承，复杂 SHX glyph 使用 marker 近似。 |
+| DWG | `DwgLoader` | 使用 LibreDWG WebAssembly。保留 active 平面 saved view、块内文字变换/对齐、闭合及带原始宽度的多段线和 LTYPE 定义；Canvas2D/WebGL 支持 dash/dot 与 BYLAYER/BYBLOCK 继承。外部 SHX 会作为缺失资源报告；补传后按原始缩放、偏移和旋转渲染复杂 shape/text glyph，未提供时使用 marker fallback。 |
 | DXF | `DxfLoader` | 使用 `dxf-parser` + 内置 fallback。支持 codepage-aware 文本解码、CAD 文本转义归一化、基础实体、block/insert、颜色/图层、多段线、hatch boundary、spline 预览。 |
 | DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、模型树元数据、WebGL 渲染和可选 WASM fallback。 |
 | DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS 页面，包含 WebGL 加速 vector path、嵌入字体、文本、图片、包内资源和自适应总览线宽，通过原生 DWF 渲染器展示。 |
@@ -474,4 +512,4 @@ public/wasm/     demo 的 WASM 输出目录
 
 ## 许可证
 
-AGPL-3.0-only。默认 DWG loader 集成 `@mlightcad/libredwg-web` / LibreDWG，DWF 渲染器集成 `dwf-viewer`。二开、分发、嵌入或作为应用组成部分使用时，请保留出处和许可证说明。闭源商用产品需要审阅所有依赖许可证，并在授权模型需要时替换对应 loader。
+AGPL-3.0-only。默认 DWG loader 集成 `@mlightcad/libredwg-web` / LibreDWG，SHX 解码使用 MIT 许可的 `@mlightcad/shx-parser`，DWF 渲染器集成 `dwf-viewer`。二开、分发、嵌入或作为应用组成部分使用时，请保留出处和许可证说明。闭源商用产品需要审阅所有依赖许可证，并在授权模型需要时替换对应 loader。

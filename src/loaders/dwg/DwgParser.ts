@@ -108,9 +108,11 @@ export async function createLibreDwg(wasmPath = '/wasm/'): Promise<{ module: Lib
 export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, version?: unknown, options: { keepRaw?: boolean } = {}): CadDocument {
   const record = rawDb && typeof rawDb === 'object' ? rawDb as Record<string, unknown> : {};
   const layers = extractLayers(record, options);
-  const lineTypes = extractLineTypes(record, options);
+  const shapeStyles = extractShxStyles(record);
+  const lineTypes = extractLineTypes(record, options, shapeStyles);
   const blocks = extractBlocks(record, options);
   const header = normalizeHeader(record.header, version);
+  const requiredShxFonts = extractRequiredShapeFonts(lineTypes);
   const savedViewResult = extractSavedView(record, header);
   const savedView = savedViewResult.view;
   const rawEntities = Array.isArray(record.entities) ? record.entities : [];
@@ -132,7 +134,8 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
       parser: '@mlightcad/libredwg-web',
       parserMode: 'wasm',
       version,
-      savedView
+      savedView,
+      requiredShxFonts
     },
     warnings: savedViewResult.warning ? [savedViewResult.warning] : [],
     raw: options.keepRaw ? rawDb : undefined
@@ -143,11 +146,50 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
   }
   const uniqueLineTypes = new Set(Object.values(lineTypes));
   if ([...uniqueLineTypes].some((lineType) => lineType.pattern.some((element) => Number(element.elementTypeFlag ?? 0) !== 0))) {
-    document.warnings.push('Complex SHX linetype glyphs are preserved in the normalized LTYPE definition and rendered as a dash/dot approximation; embedded shape glyph fidelity is not available yet.');
+    const dependency = requiredShxFonts.length > 0
+      ? ` This drawing references external shape font${requiredShxFonts.length === 1 ? '' : 's'} ${requiredShxFonts.join(', ')}, whose outlines are not embedded in the DWG.`
+      : '';
+    document.warnings.push(`Complex SHX linetype glyphs are preserved in the normalized LTYPE definition and rendered as a dash/dot approximation.${dependency}`);
   }
   return document;
 }
 
+function extractRequiredShapeFonts(lineTypes: Record<string, CadLineType>): string[] {
+  const referenced = new Set<string>();
+  for (const lineType of new Set(Object.values(lineTypes))) {
+    for (const element of lineType.pattern) {
+      if (Number(element.elementTypeFlag ?? 0) !== 0 && element.fontName) referenced.add(element.fontName);
+    }
+  }
+  return [...referenced].sort((left, right) => left.localeCompare(right));
+}
+
+interface DwgShxStyles {
+  byReference: Map<string, string>;
+  shapeFonts: string[];
+}
+
+function extractShxStyles(rawDb: Record<string, unknown>): DwgShxStyles {
+  const tables = rawDb.tables as Record<string, unknown> | undefined;
+  const candidates = [rawDb.STYLE, rawDb.styles, tables?.STYLE, tables?.styles];
+  const byReference = new Map<string, string>();
+  const shapeFonts = new Set<string>();
+  for (const candidate of candidates) {
+    for (const item of expandCandidate(candidate)) {
+      if (!item || typeof item !== 'object') continue;
+      const record = item as Record<string, unknown>;
+      const font = stringOrUndefined(record.font ?? record.fontFileName ?? record.primaryFontFileName);
+      if (!font || !/\.shx$/i.test(font)) continue;
+      const flag = numberOrUndefined(record.standardFlag ?? record.flag) ?? 0;
+      if ((flag & 1) === 1) shapeFonts.add(font);
+      for (const reference of [record.handle, record.id, record.name]) {
+        const key = styleReferenceKey(reference);
+        if (key) byReference.set(key, font);
+      }
+    }
+  }
+  return { byReference, shapeFonts: [...shapeFonts] };
+}
 
 function normalizeDwgEntity(record: Record<string, unknown>, options: { keepRaw?: boolean; includeUnknownProperties?: boolean }): CadEntity {
   const entity = normalizeCadEntity(record, undefined, { ...options, numericColorMode: 'rgb' });
@@ -220,7 +262,7 @@ function extractLayers(rawDb: Record<string, unknown>, options: { keepRaw?: bool
   return result;
 }
 
-function extractLineTypes(rawDb: Record<string, unknown>, options: { keepRaw?: boolean }): Record<string, CadLineType> {
+function extractLineTypes(rawDb: Record<string, unknown>, options: { keepRaw?: boolean }, styles: DwgShxStyles): Record<string, CadLineType> {
   const result: Record<string, CadLineType> = {};
   const tables = rawDb.tables as Record<string, unknown> | undefined;
   const candidates = [rawDb.LTYPE, rawDb.ltype, rawDb.lineTypes, tables?.LTYPE, tables?.ltype, tables?.lineTypes];
@@ -247,15 +289,21 @@ function extractLineTypes(rawDb: Record<string, unknown>, options: { keepRaw?: b
         // and shape_flag is group 74 (element type). Restore the public DXF
         // semantics here instead of leaking the converter mismatch downstream.
         const hasLibreDwgPair = convertedShapeCode !== undefined && convertedTypeFlag !== undefined;
+        const elementTypeFlag = hasLibreDwgPair ? convertedTypeFlag : numberOrUndefined(part.typeFlag ?? part.elementTypeFlag);
+        const styleHandle = stringOrUndefined(part.styleObjectId ?? part.styleHandle ?? part.style);
+        const fontName = (styleHandle ? styles.byReference.get(styleReferenceKey(styleHandle)) : undefined)
+          ?? ((Number(elementTypeFlag ?? 0) & 4) === 4 && styles.shapeFonts.length === 1 ? styles.shapeFonts[0] : undefined);
         return [{
           length,
-          elementTypeFlag: hasLibreDwgPair ? convertedTypeFlag : numberOrUndefined(part.typeFlag ?? part.elementTypeFlag),
+          elementTypeFlag,
           shapeNumber: hasLibreDwgPair ? convertedShapeCode : numberOrUndefined(part.shapeCode ?? part.shapeNumber),
           scale: numberOrUndefined(part.scale),
           rotation: numberOrUndefined(part.rotation),
           offsetX: numberOrUndefined(part.offsetX),
           offsetY: numberOrUndefined(part.offsetY),
-          text: stringOrUndefined(part.text)
+          text: stringOrUndefined(part.text),
+          styleHandle,
+          fontName
         }];
       });
       addLineType(result, {
@@ -269,6 +317,10 @@ function extractLineTypes(rawDb: Record<string, unknown>, options: { keepRaw?: b
     }
   }
   return result;
+}
+
+function styleReferenceKey(value: unknown): string {
+  return String(value ?? '').trim().replace(/^0x/i, '').replace(/^0+(?=[0-9a-f])/i, '').toLowerCase();
 }
 
 function extractSavedView(rawDb: Record<string, unknown>, header: Record<string, unknown>): { view?: CadSavedView; warning?: string } {

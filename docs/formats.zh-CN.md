@@ -6,7 +6,9 @@ DWG 是专有二进制 CAD 数据库格式。本项目默认使用 `@mlightcad/l
 
 DWG loader 被隔离在 `DwgLoader` 后面，因此后续可以替换成其他 parser，或替换成授权转换服务。
 
-渲染完整度取决于 parser 暴露出的归一化实体。默认 renderer 覆盖常见 2D 基础实体，并在 block 定义可用时展开 INSERT。DWG 链路还会保留 active VPORT/header UCS saved view、LTYPE 定义、线型缩放和 converter 特有的闭合多段线 flag。安全的平面 saved view 只应用一次；非法或倾斜视图保留 WCS 坐标。Canvas2D 与 WebGL 支持 BYLAYER/BYBLOCK 虚线和点线，复杂 SHX glyph 使用 marker 近似。
+渲染完整度取决于 parser 暴露出的归一化实体。默认 renderer 覆盖常见 2D 基础实体，并在 block 定义可用时展开 INSERT。DWG 链路会保留 active VPORT/header UCS saved view、块内文字的宽度因子/对齐/镜像属性、常量和顶点多段线宽度、LTYPE 定义、线型缩放及 converter 特有的闭合多段线 flag。安全的平面 saved view 只应用一次；文字和 INSERT 角度会在变换后归一化，非法或倾斜视图则保留 WCS 坐标。Canvas2D 与 WebGL 支持 BYLAYER/BYBLOCK 虚线和点线，并在多段线边之间保持线型相位。
+
+复杂线型中的 SHX shape 并不会把轮廓嵌入 DWG；图纸引用的外部字体会列在 `document.metadata.requiredShxFonts`，未解析项列在 `document.metadata.missingReferences`。应用可以通过 `CadViewer.addReference*()` 传入用户选择的本地 `File`，也可以传入业务 API 提供的 `ArrayBuffer`/`Uint8Array`。Canvas2D 与 WebGL 随后会按原始缩放、局部 X/Y 偏移及相对/绝对旋转绘制解码后的 shape/text 轮廓。兼容文件尚未提供时，renderer 会保留 dash/gap 长度和相位，并使用 marker fallback；要获得准确符号外观仍需要原始 SHX。
 
 ## DXF
 

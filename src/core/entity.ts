@@ -76,6 +76,8 @@ export function normalizeCadEntity(raw: Record<string, unknown>, forcedType?: st
   entity.lineType = stringOrUndefined(raw.lineType ?? raw.linetype);
   entity.lineTypeScale = numberOrUndefined(raw.lineTypeScale ?? raw.linetypeScale ?? raw.ltscale) ?? entity.lineTypeScale;
   entity.flag = numberOrUndefined(raw.flag ?? raw.flags) ?? entity.flag;
+  entity.constantWidth = numberOrUndefined(raw.constantWidth ?? raw.constWidth ?? raw.const_width) ?? entity.constantWidth;
+  entity.thickness = numberOrUndefined(raw.thickness) ?? entity.thickness;
   const explicitClosed = raw.isClosed === true || raw.closed === true || raw.shape === true;
   const typeUsesClassicPolylineFlag = /^(POLYLINE|POLYLINE_2D|POLYLINE2D|POLYLINE_3D|POLYLINE3D|SPLINE)$/.test(type);
   const typeUsesLwPolylineFlag = type === 'LWPOLYLINE';
@@ -112,10 +114,28 @@ export function normalizeCadEntity(raw: Record<string, unknown>, forcedType?: st
   entity.axisRatio = numberOrUndefined(raw.axisRatio ?? raw.ratio) ?? entity.axisRatio;
   entity.height = numberOrUndefined(raw.height ?? raw.textHeight) ?? entity.height;
   entity.textHeight = numberOrUndefined(raw.textHeight ?? raw.height) ?? entity.textHeight;
+  entity.xScale = numberOrUndefined(raw.xScale ?? raw.widthFactor) ?? entity.xScale;
+  entity.generationFlag = numberOrUndefined(raw.generationFlag ?? raw.textGenerationFlag) ?? entity.generationFlag;
+  entity.halign = numberOrUndefined(raw.halign ?? raw.horizontalAlignment) ?? entity.halign;
+  entity.valign = numberOrUndefined(raw.valign ?? raw.verticalAlignment) ?? entity.valign;
+  entity.extrusionDirection = pointFromUnknown(raw.extrusionDirection ?? raw.extrusion) ?? entity.extrusionDirection;
   entity.rotation = numberOrUndefined(raw.rotation ?? raw.angle) ?? entity.rotation;
   entity.text = stringOrUndefined(raw.text ?? raw.value ?? raw.string ?? raw.contents) ?? entity.text;
   entity.name = stringOrUndefined(raw.name ?? raw.blockName) ?? entity.name;
   entity.blockName = stringOrUndefined(raw.blockName ?? raw.name) ?? entity.blockName;
+  if (type === 'INSERT') {
+    const scale = pointFromUnknown(raw.scale);
+    if (scale) {
+      entity.scale = scale;
+    } else {
+      const scaleX = numberOrUndefined(raw.scaleX ?? raw.xScale);
+      const scaleY = numberOrUndefined(raw.scaleY ?? raw.yScale) ?? scaleX;
+      const scaleZ = numberOrUndefined(raw.scaleZ ?? raw.zScale);
+      if (scaleX !== undefined && scaleY !== undefined) {
+        entity.scale = scaleZ === undefined ? { x: scaleX, y: scaleY } : { x: scaleX, y: scaleY, z: scaleZ };
+      }
+    }
+  }
 
   const vertices = normalizePoints(raw.vertices ?? raw.points);
   if (vertices.length > 0) entity.vertices = vertices;
@@ -184,9 +204,27 @@ export function isCadPolylineClosed(entity: CadEntity): boolean {
   if (entity.isClosed === true) return true;
   const type = String(entity.type ?? '').toUpperCase();
   const flag = Number(entity.flag ?? 0);
-  if (type === 'LWPOLYLINE') return (flag & 0x200) === 0x200;
-  if (/^(POLYLINE|POLYLINE_2D|POLYLINE2D|POLYLINE_3D|POLYLINE3D)$/.test(type)) return (flag & 1) === 1;
-  return false;
+  const isLightweightPolyline = type === 'LWPOLYLINE';
+  const isClassicPolyline = /^(POLYLINE|POLYLINE_2D|POLYLINE2D|POLYLINE_3D|POLYLINE3D)$/.test(type);
+  if (isLightweightPolyline && (flag & 0x200) === 0x200) return true;
+  if (isClassicPolyline && (flag & 1) === 1) return true;
+  if (!isLightweightPolyline && !isClassicPolyline) return false;
+  const points = entity.vertices ?? entity.points;
+  if (!Array.isArray(points) || points.length < 3) return false;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (!first || !last) return false;
+  const extent = points.reduce((max, point) => Math.max(max, Math.abs(point.x), Math.abs(point.y)), 1);
+  return Math.hypot(first.x - last.x, first.y - last.y) <= Math.max(1e-9, extent * 1e-12);
+}
+
+/** Returns an entity's authored polyline width in drawing units. */
+export function cadEntityWorldStrokeWidth(entity: CadEntity): number {
+  let width = finiteNonNegative(entity.constantWidth);
+  for (const vertex of entity.vertices ?? []) {
+    width = Math.max(width, finiteNonNegative(vertex.startWidth), finiteNonNegative(vertex.endWidth));
+  }
+  return width;
 }
 
 export function addLayer(target: Record<string, CadLayer>, layer: CadLayer): void {
@@ -225,4 +263,9 @@ export function stringOrUndefined(value: unknown): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined;
   const out = String(value);
   return out.length > 0 ? out : undefined;
+}
+
+function finiteNonNegative(value: unknown): number {
+  const number = Math.abs(Number(value));
+  return Number.isFinite(number) ? number : 0;
 }

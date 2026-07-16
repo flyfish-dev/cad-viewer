@@ -23,6 +23,7 @@ DWF/DWFx/XPS: DwfLoader.mount() → dwf-viewer native renderer
 DWG: WCS CadDocument + LTYPE/saved view → safe scene transform → retained WebGL batches + Canvas overlay
 DXF: CadDocument → retained WebGL batches + Canvas overlay
 DWF/DWFx/XPS: W2D/XPS WebGL vectors + W3D/HSF 3D + Canvas text/image overlay + optional WASM fallback
+External SHX File / bytes → CadShxFontRegistry → validated glyph cache → Canvas2D/WebGL linetype rebuild
 ```
 
 ## Key modules
@@ -32,6 +33,7 @@ src/core/types.ts       public data model
 src/core/color.ts       ACI / true color / BYLAYER resolution
 src/core/geometry.ts    CAD geometry helpers
 src/core/linetype.ts    LTYPE resolution, inheritance and dash/dot expansion
+src/core/shx.ts         external SHX parsing, validation, cache and reference state
 src/core/scene.ts       saved-view scene normalization
 src/core/transform.ts   block insert, saved-view and XPS matrix transforms
 src/loaders/            loader registry and default loaders
@@ -62,8 +64,9 @@ Core performance choices:
 - Coordinates are stored relative to the drawing center to reduce Float32 precision loss with large CAD coordinates.
 - Lines, fills and points are uploaded separately; colors use normalized `Uint8Array`.
 - Geometry is bucketed spatially, so zoomed-in views submit only batches intersecting the viewport.
-- DWG line patterns keep world-unit phase across polyline edges; zero-length dots and unavailable complex SHX glyphs use screen-space markers.
-- Text and images are kept out of the main GPU geometry stream and drawn through an overlay with size/count limits.
+- Polylines with constant or per-vertex widths are expanded into triangles in the retained WebGL scene; Canvas2D uses the same world-unit width semantics.
+- DWG line patterns keep world-unit phase across polyline edges. Supplied SHX shape/text glyphs honor authored scale, local offset and relative/absolute rotation; zero-length dots and unavailable glyphs use screen-space markers.
+- Text and images are kept out of the main GPU geometry stream and drawn through an overlay with size/count limits; block-contained TEXT width factors, alignment points, generation flags and transformed angles are preserved.
 - When WebGL is unavailable, `renderer: 'auto'` falls back to `CadCanvasRenderer`.
 
 ## DWG worker model
@@ -90,6 +93,24 @@ main thread
 The worker payload intentionally excludes raw parser objects by default. That keeps messages structured-clone-safe and avoids doubling memory use for large drawings. Use `keepRaw: true` only for debugging.
 
 The loader accepts `AbortSignal`, `workerTimeoutMs`, `workerUrl` and `workerFactory`, so applications can cancel large files and integrate with custom bundler/CDN asset layouts. Serve `dwg-worker.js` beside the `/wasm` runtime assets or pass `workerUrl` explicitly.
+
+## External SHX reference model
+
+LibreDWG normalization preserves each complex LTYPE element's STYLE handle and resolves it to an SHX file name. `CadShxFontRegistry` stays on the main thread and outside `CadDocument`, so third-party parser instances never enter Worker messages or public serializable scene data.
+
+```text
+CadDocument LTYPE + metadata.requiredShxFonts
+  ↓
+CadShxFontRegistry.setDocument()
+  ↓
+missing/loaded state + required-glyph validation
+  ↓ addReferenceFile() / addReferenceBuffer()
+@mlightcad/shx-parser → normalized, cached polylines
+  ↓
+Canvas2D immediate redraw / WebGL retained-scene rebuild with view state preserved
+```
+
+References may be registered before or after a drawing. File names are matched case-insensitively by basename; same-named files that do not contain required shape/text codes remain `incompatible`. Missing resources are mirrored to `document.metadata.missingReferences` and reported through `onReferenceStateChange`. Loaded parsers are released on replacement, removal, `clearReferences()` or `destroy()`.
 
 
 ## Native DWF renderer model
@@ -156,7 +177,7 @@ The default WebGL renderer supports common preview geometry:
 - LINE, CIRCLE, ARC, LWPOLYLINE, POLYLINE.
 - ELLIPSE, SPLINE preview polyline.
 - TEXT, MTEXT, ATTRIB, DIMENSION text fallback.
-- INSERT block expansion with translation/rotation/scale.
+- INSERT block expansion with translation/rotation/scale and composed text, line-width and linetype-scale semantics.
 - SOLID, TRACE, 3DFACE.
 - HATCH loop preview.
 

@@ -23,6 +23,7 @@ DWF/DWFx/XPS：DwfLoader.mount() → dwf-viewer native renderer
 DWG：WCS CadDocument + LTYPE/saved view → 安全场景变换 → retained WebGL batches + Canvas overlay
 DXF：CadDocument → retained WebGL batches + Canvas overlay
 DWF/DWFx/XPS：W2D/XPS WebGL 矢量 + W3D/HSF 3D + Canvas 文字/图片 overlay + 可选 WASM fallback
+外部 SHX File / bytes → CadShxFontRegistry → glyph 校验与缓存 → Canvas2D/WebGL 线型重建
 ```
 
 ## 核心模块
@@ -32,6 +33,7 @@ src/core/types.ts       公共数据模型
 src/core/color.ts       ACI / true color / BYLAYER 解析
 src/core/geometry.ts    CAD 几何工具
 src/core/linetype.ts    LTYPE 解析、继承与 dash/dot 展开
+src/core/shx.ts         外部 SHX 解析、校验、缓存与引用状态
 src/core/scene.ts       saved-view 场景归一化
 src/core/transform.ts   block insert、saved-view 与 XPS matrix 变换
 src/loaders/            loader registry 与默认 loaders
@@ -62,8 +64,9 @@ spatial batch upload
 - 坐标以图纸中心为 origin 存储，降低大坐标 Float32 精度损失。
 - 线、面、点分开上传，颜色使用 normalized `Uint8Array`。
 - 按图纸范围空间分桶，放大后只提交视口相交 batch。
-- DWG 线型在多段线边之间保持 world-unit 相位；零长度 dot 和暂不可用的复杂 SHX glyph 使用屏幕 marker。
-- 文本和图片不进入 GPU 主几何流，使用 overlay 并做阈值/数量限制。
+- 带常量/顶点宽度的多段线会在 WebGL retained scene 中展开为三角面；Canvas2D 使用相同的 world-unit 宽度语义。
+- DWG 线型在多段线边之间保持 world-unit 相位；已提供的 SHX shape/text glyph 会保留原始缩放、局部偏移及相对/绝对旋转；零长度 dot 和暂不可用的 glyph 使用屏幕 marker。
+- 文本和图片不进入 GPU 主几何流，使用 overlay 并做阈值/数量限制；块内 TEXT 的 width factor、对齐点、镜像 flag 和变换后角度会保留。
 - WebGL 不可用时，`renderer: 'auto'` 回退到 `CadCanvasRenderer`。
 
 ## DWG Worker 模型
@@ -90,6 +93,24 @@ Worker 线程
 Worker 默认不会把 parser raw 对象传回主线程，避免 structured clone 失败，也避免大型图纸内存翻倍。只有调试时才建议使用 `keepRaw: true`。
 
 Loader 支持 `AbortSignal`、`workerTimeoutMs`、`workerUrl` 和 `workerFactory`，应用可以取消大文件加载，并适配自定义 bundler/CDN 资源布局。请把 `dwg-worker.js` 与 `/wasm` 运行时资源一起公开托管，或者显式传入 `workerUrl`。
+
+## 外部 SHX 引用模型
+
+LibreDWG 归一化会保留复杂 LTYPE 元素的 STYLE handle，并解析到具体 SHX 文件名。`CadShxFontRegistry` 位于主线程且独立于 `CadDocument`，第三方 parser 实例不会进入 Worker 消息或公开的可序列化场景数据。
+
+```text
+CadDocument LTYPE + metadata.requiredShxFonts
+  ↓
+CadShxFontRegistry.setDocument()
+  ↓
+missing/loaded 状态 + 必需 glyph 校验
+  ↓ addReferenceFile() / addReferenceBuffer()
+@mlightcad/shx-parser → 归一化并缓存的折线
+  ↓
+Canvas2D 即时重绘 / WebGL 保持 view state 的 retained-scene 重建
+```
+
+引用可以在加载图纸前或之后注册。文件名按 basename 做大小写无关匹配；同名但不包含必需 shape/text code 的文件仍标记为 `incompatible`。缺失资源会同步到 `document.metadata.missingReferences`，并通过 `onReferenceStateChange` 上报。替换、移除、`clearReferences()` 或 `destroy()` 时会释放对应 parser。
 
 
 ## Native DWF 渲染模型
@@ -156,7 +177,7 @@ WebGL renderer 和 Canvas2D fallback 支持常见预览几何：
 - LINE、CIRCLE、ARC、LWPOLYLINE、POLYLINE。
 - ELLIPSE、SPLINE 预览多段线。
 - TEXT、MTEXT、ATTRIB、DIMENSION 文本兜底。
-- INSERT 块展开，支持平移、旋转、缩放。
+- INSERT 块展开，支持平移、旋转、缩放，并组合块内文字、线宽和线型缩放语义。
 - SOLID、TRACE、3DFACE。
 - HATCH boundary loop 预览。
 

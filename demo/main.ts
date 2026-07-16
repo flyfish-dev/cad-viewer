@@ -1,6 +1,6 @@
 import '../src/styles.css';
 import './styles.css';
-import { CadViewer, isWebGLAvailable, supportsDwgWorker, type CadLoadProgress, type CadViewerLoadResult, type RenderStats, type ViewChangeEvent } from '../src';
+import { CadViewer, isWebGLAvailable, supportsDwgWorker, type CadLoadProgress, type CadReferenceState, type CadViewerLoadResult, type CadViewerRendererBackend, type RenderStats, type ViewChangeEvent } from '../src';
 
 const host = document.querySelector<HTMLDivElement>('#app');
 if (!host) throw new Error('#app not found');
@@ -15,6 +15,7 @@ host.innerHTML = `
 
       <div class="toolbar" role="toolbar" aria-label="Viewer controls">
         <input id="file-input" class="visually-hidden" type="file" accept=".dwg,.dxf,.dwf,.dwfx,.xps" />
+        <input id="reference-input" class="visually-hidden" type="file" accept=".shx" multiple />
         <button id="open-button" class="btn btn-primary">Open</button>
         <span class="toolbar-divider"></span>
         <button id="fit-button" class="btn">Fit</button>
@@ -63,6 +64,10 @@ host.innerHTML = `
             <div class="progress-track"><span id="load-progress" style="width: 0%"></span></div>
           </div>
         </div>
+        <button id="reference-upload" class="reference-upload is-hidden" type="button" title="Upload missing SHX reference">
+          <span>Missing SHX</span>
+          <strong id="reference-upload-name">External SHX font</strong>
+        </button>
         <div class="canvas-hud">
           <span id="cursor">x: —, y: —</span>
           <span>Wheel zoom · Drag pan</span>
@@ -92,6 +97,7 @@ host.innerHTML = `
 const app = getElement<HTMLElement>('cad-app');
 
 const fileInput = getElement<HTMLInputElement>('file-input');
+const referenceInput = getElement<HTMLInputElement>('reference-input');
 const openButton = getElement<HTMLButtonElement>('open-button');
 const fitButton = getElement<HTMLButtonElement>('fit-button');
 const zoomInButton = getElement<HTMLButtonElement>('zoom-in-button');
@@ -109,6 +115,8 @@ const loadDetailEl = getElement<HTMLElement>('load-detail');
 const loadPercentEl = getElement<HTMLElement>('load-percent');
 const loadProgressEl = getElement<HTMLElement>('load-progress');
 const canvas = getElement<HTMLCanvasElement>('cad-canvas');
+const referenceUploadButton = getElement<HTMLButtonElement>('reference-upload');
+const referenceUploadNameEl = getElement<HTMLElement>('reference-upload-name');
 
 const fileNameEl = getElement<HTMLElement>('file-name');
 const fileNameDetailEl = getElement<HTMLElement>('file-name-detail');
@@ -135,6 +143,7 @@ type UiTheme = 'dark' | 'light';
 type DrawingTheme = 'dark' | 'light';
 
 const WASM_PATH = new URL('wasm/', document.baseURI).href;
+const DEMO_RENDERER = resolveDemoRenderer();
 
 const DRAWING_THEMES: Record<DrawingTheme, { background: string; foreground: string; minContrast: number }> = {
   dark: { background: '#05070d', foreground: '#f8fafc', minContrast: 2.45 },
@@ -148,7 +157,7 @@ let activeAbort: AbortController | undefined;
 
 const viewer = new CadViewer({
   canvas,
-  renderer: 'auto',
+  renderer: DEMO_RENDERER,
   wasmPath: WASM_PATH,
   canvasOptions: {
     background: DRAWING_THEMES[drawingTheme].background,
@@ -180,12 +189,14 @@ const viewer = new CadViewer({
     if (!viewer.getDocument()) emptyHint.classList.remove('is-hidden');
   },
   onRenderStats: updateRenderStats,
-  onViewChange: updateViewInfo
+  onViewChange: updateViewInfo,
+  onReferenceStateChange: updateReferenceState
 });
 
 applyAppearance();
 
 openButton.addEventListener('click', () => fileInput.click());
+referenceUploadButton.addEventListener('click', () => referenceInput.click());
 fitButton.addEventListener('click', () => viewer.fit());
 zoomInButton.addEventListener('click', () => viewer.zoomIn());
 zoomOutButton.addEventListener('click', () => viewer.zoomOut());
@@ -245,6 +256,11 @@ fileInput.addEventListener('change', async () => {
   fileInput.value = '';
 });
 
+referenceInput.addEventListener('change', async () => {
+  await addReferenceFiles([...referenceInput.files ?? []]);
+  referenceInput.value = '';
+});
+
 for (const eventName of ['dragenter', 'dragover']) {
   dropZone.addEventListener(eventName, (event) => {
     event.preventDefault();
@@ -258,8 +274,11 @@ for (const eventName of ['dragleave', 'drop']) {
   });
 }
 dropZone.addEventListener('drop', async (event) => {
-  const file = event.dataTransfer?.files?.[0];
-  if (file) await loadFile(file);
+  const files = [...event.dataTransfer?.files ?? []];
+  const references = files.filter((file) => /\.shx$/i.test(file.name));
+  if (references.length > 0) await addReferenceFiles(references);
+  const drawing = files.find((file) => !/\.shx$/i.test(file.name));
+  if (drawing) await loadFile(drawing);
 });
 
 canvas.addEventListener('mousemove', (event) => {
@@ -305,11 +324,49 @@ function updateLoadInfo(result: CadViewerLoadResult): void {
     ? entries.slice(0, 24).map(([type, count]) => `<span><b>${escapeHtml(type)}</b>${count.toLocaleString()}</span>`).join('')
     : 'No entities.';
 
-  warningsEl.classList.toggle('muted', result.warnings.length === 0);
-  warningsEl.innerHTML = result.warnings.length ? result.warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join('') : '—';
+  updateWarnings(result.warnings);
   emptyHint.classList.add('is-hidden');
   setLoading(false);
   setStatus(`Loaded ${result.format.toUpperCase()} · ${result.summary.entityCount.toLocaleString()} entities`);
+}
+
+async function addReferenceFiles(files: File[]): Promise<void> {
+  if (files.length === 0) return;
+  referenceUploadButton.disabled = true;
+  try {
+    for (const file of files) {
+      setStatus(`Loading reference ${file.name}…`);
+      await viewer.addReferenceFile(file);
+    }
+    const missing = viewer.getMissingReferences();
+    const loadedNames = files.map((file) => file.name).join(', ');
+    setStatus(missing.length === 0
+      ? `Loaded SHX reference${files.length === 1 ? '' : 's'} · preview completed`
+      : `Loaded ${loadedNames} · still missing ${missing.map(({ fileName }) => fileName).join(', ')}`,
+    missing.some(({ reason }) => reason === 'incompatible'));
+    updateWarnings(viewer.getLoadResult()?.warnings ?? []);
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true);
+  } finally {
+    referenceUploadButton.disabled = false;
+  }
+}
+
+function updateReferenceState(state: CadReferenceState): void {
+  const missing = state.missing;
+  referenceUploadButton.classList.toggle('is-hidden', missing.length === 0);
+  if (missing.length === 0) return;
+  const names = missing.map(({ fileName }) => fileName).join(', ');
+  referenceUploadNameEl.textContent = names;
+  referenceUploadButton.title = missing.some(({ reason }) => reason === 'incompatible')
+    ? `Upload a compatible SHX file for ${names}`
+    : `Upload missing SHX reference: ${names}`;
+  referenceUploadButton.setAttribute('aria-label', referenceUploadButton.title);
+}
+
+function updateWarnings(warnings: string[]): void {
+  warningsEl.classList.toggle('muted', warnings.length === 0);
+  warningsEl.innerHTML = warnings.length ? warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join('') : '—';
 }
 
 function updateRenderStats(stats: RenderStats): void {
@@ -353,6 +410,7 @@ function setLoading(active: boolean, title = 'Loading CAD file', detail = 'Prepa
   cancelButton.classList.toggle('is-hidden', !active);
   openButton.disabled = active;
   clearButton.disabled = active;
+  referenceUploadButton.disabled = active;
   loadTitleEl.textContent = title;
   loadDetailEl.textContent = detail;
   const clamped = Math.max(0, Math.min(100, percent));
@@ -425,4 +483,9 @@ function formatBytes(bytes: number): string {
   let index = 0;
   while (value >= 1024 && index < units.length - 1) { value /= 1024; index++; }
   return `${value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[index]}`;
+}
+
+function resolveDemoRenderer(): CadViewerRendererBackend {
+  const value = new URLSearchParams(window.location.search).get('renderer');
+  return value === 'canvas2d' || value === 'webgl' ? value : 'auto';
 }

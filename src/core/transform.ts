@@ -64,6 +64,10 @@ export function matrixFromInsert(entity: CadEntity, basePoint: CadPoint3D = { x:
 
 export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity {
   const clone: CadEntity = { ...entity };
+  const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+  const scaleApprox = Math.sqrt(Math.abs(determinant));
+  const scaleX = Math.hypot(matrix.a, matrix.b);
+  const scaleY = Math.hypot(matrix.c, matrix.d);
   if (entity.startPoint) clone.startPoint = transformPoint(entity.startPoint, matrix);
   if (entity.endPoint) clone.endPoint = transformPoint(entity.endPoint, matrix);
   if (entity.center) clone.center = transformPoint(entity.center, matrix);
@@ -73,7 +77,14 @@ export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity 
     const major = transformPoint(entity.majorAxisEndPoint, matrix);
     clone.majorAxisEndPoint = { x: major.x - origin.x, y: major.y - origin.y, z: major.z };
   }
-  if (entity.vertices) clone.vertices = entity.vertices.map((p) => ({ ...transformPoint(p, matrix), bulge: p.bulge, startWidth: p.startWidth, endWidth: p.endWidth }));
+  if (entity.vertices) {
+    clone.vertices = entity.vertices.map((point) => ({
+      ...transformPoint(point, matrix),
+      bulge: point.bulge,
+      startWidth: scaleDimension(point.startWidth, scaleApprox),
+      endWidth: scaleDimension(point.endWidth, scaleApprox)
+    }));
+  }
   if (entity.points) clone.points = entity.points.map((p) => transformPoint(p, matrix));
   if (entity.controlPoints) clone.controlPoints = entity.controlPoints.map((p) => transformPoint(p, matrix));
   if (entity.fitPoints) clone.fitPoints = entity.fitPoints.map((p) => transformPoint(p, matrix));
@@ -87,23 +98,41 @@ export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity 
     }));
   }
 
-  const scaleApprox = Math.sqrt(Math.abs(matrix.a * matrix.d - matrix.b * matrix.c));
   if (typeof entity.radius === 'number' && Number.isFinite(scaleApprox)) clone.radius = entity.radius * scaleApprox;
+  if (typeof entity.constantWidth === 'number' && Number.isFinite(scaleApprox)) clone.constantWidth = entity.constantWidth * scaleApprox;
+  if (typeof entity.thickness === 'number' && Number.isFinite(scaleApprox)) clone.thickness = entity.thickness * scaleApprox;
+  if (typeof entity.lineTypeScale === 'number' && Number.isFinite(scaleApprox)) clone.lineTypeScale = entity.lineTypeScale * scaleApprox;
+  if (entity.kind === 'text' || /^(TEXT|MTEXT|ATTRIB|ATTDEF|DIMENSION)$/i.test(String(entity.type ?? ''))) {
+    if (typeof entity.textHeight === 'number' && Number.isFinite(scaleY)) clone.textHeight = entity.textHeight * scaleY;
+    if (typeof entity.height === 'number' && Number.isFinite(scaleY)) clone.height = entity.height * scaleY;
+    if (typeof entity.xScale === 'number' && scaleY > 1e-14 && Number.isFinite(scaleX)) clone.xScale = entity.xScale * scaleX / scaleY;
+  }
   const rotation = Math.atan2(matrix.b, matrix.a);
   const ellipseAnglesAreRelative = entity.kind === 'ellipse' || String(entity.type ?? '').toUpperCase() === 'ELLIPSE';
+  if (typeof entity.rotation === 'number' || entity.kind === 'text' || entity.kind === 'insert') {
+    clone.rotation = normalizeRotation(Number(entity.rotation ?? 0) + (Number.isFinite(rotation) ? rotation : 0));
+  }
   if (Number.isFinite(rotation) && Math.abs(rotation) > 1e-14) {
-    if (typeof entity.rotation === 'number' || entity.kind === 'text' || entity.kind === 'insert') {
-      clone.rotation = Number(entity.rotation ?? 0) + rotation;
-    }
     // ARC angles are WCS angles and rotate with the scene. ELLIPSE start/end
     // parameters are relative to majorAxisEndPoint, which was already rotated.
     if (!ellipseAnglesAreRelative && typeof entity.startAngle === 'number') clone.startAngle = entity.startAngle + rotation;
     if (!ellipseAnglesAreRelative && typeof entity.endAngle === 'number') clone.endAngle = entity.endAngle + rotation;
   }
-  if (matrix.a * matrix.d - matrix.b * matrix.c < 0 && clone.vertices) {
+  if (determinant < 0 && clone.vertices) {
     clone.vertices = clone.vertices.map((point) => ({ ...point, bulge: typeof point.bulge === 'number' ? -point.bulge : undefined }));
   }
   return clone;
+}
+
+function scaleDimension(value: number | undefined, scale: number): number | undefined {
+  return typeof value === 'number' && Number.isFinite(scale) ? value * scale : value;
+}
+
+function normalizeRotation(angle: number): number {
+  if (!Number.isFinite(angle)) return angle;
+  const tau = Math.PI * 2;
+  const normalized = ((angle + Math.PI) % tau + tau) % tau - Math.PI;
+  return Math.abs(normalized) <= 1e-12 ? 0 : normalized;
 }
 
 export function parseMatrix(value: string | null | undefined): Matrix2D | undefined {

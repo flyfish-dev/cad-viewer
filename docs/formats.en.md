@@ -6,7 +6,9 @@ DWG is a proprietary binary CAD database. This project uses `@mlightcad/libredwg
 
 The loader is intentionally isolated behind `DwgLoader`, so it can be replaced with another parser or a licensed conversion backend.
 
-Rendering completeness depends on the normalized entities exposed by the parser. The renderer covers common 2D primitives and block insert expansion when block definitions are available. The DWG path also preserves the active VPORT/header UCS saved view, LTYPE definitions, linetype scales and converter-specific closed-polyline flags. Safe planar saved views are applied once to the render scene; invalid or tilted views keep WCS coordinates. Canvas2D and WebGL render dashed/dotted patterns with BYLAYER/BYBLOCK inheritance, while complex SHX glyphs use a marker approximation.
+Rendering completeness depends on the normalized entities exposed by the parser. The renderer covers common 2D primitives and block insert expansion when block definitions are available. The DWG path preserves the active VPORT/header UCS saved view, block-contained text width/alignment/mirroring properties, constant and per-vertex polyline widths, LTYPE definitions, linetype scales and converter-specific closed-polyline flags. Safe planar saved views are applied once, with text and INSERT angles canonicalized after transformation; invalid or tilted views keep WCS coordinates. Canvas2D and WebGL render dashed/dotted patterns with BYLAYER/BYBLOCK inheritance and continuous phase across polyline edges.
+
+SHX shapes in complex linetypes do not embed their outlines in the DWG. Referenced external fonts are listed in `document.metadata.requiredShxFonts` and unresolved entries in `document.metadata.missingReferences`. Applications can supply a local `File` or API-provided `ArrayBuffer`/`Uint8Array` through `CadViewer.addReference*()`. Canvas2D and WebGL then render the decoded shape/text outlines with authored scale, local X/Y offset and relative/absolute rotation. Until a compatible file is available, the renderer preserves dash/gap lengths and phase and uses a marker fallback; exact symbol fidelity requires the original SHX.
 
 ## DXF
 

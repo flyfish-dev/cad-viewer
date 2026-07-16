@@ -44,6 +44,10 @@ export interface CadLineTypeElement {
   offsetX?: number;
   offsetY?: number;
   text?: string;
+  /** STYLE table handle referenced by DXF group 340 / the DWG LTYPE dash. */
+  styleHandle?: string;
+  /** Resolved SHX file name from the referenced STYLE table entry. */
+  fontName?: string;
 }
 
 export interface CadLineType {
@@ -141,12 +145,21 @@ export interface CadEntity {
   knots?: number[];
   isClosed?: boolean;
   flag?: number;
+  /** Constant polyline width in drawing units. */
+  constantWidth?: number;
+  thickness?: number;
 
   insertionPoint?: CadPoint3D;
   text?: string;
   value?: string;
   height?: number;
   textHeight?: number;
+  /** TEXT width factor, where 1 is the authored glyph width. */
+  xScale?: number;
+  generationFlag?: number;
+  halign?: number;
+  valign?: number;
+  extrusionDirection?: CadPoint3D;
   rotation?: number;
   scale?: CadPoint3D;
   name?: string;
@@ -199,6 +212,32 @@ export interface CadLoadInput {
   file?: File;
   fileName?: string;
   buffer?: ArrayBuffer | Uint8Array;
+}
+
+export interface CadReferenceInput {
+  file?: File;
+  fileName?: string;
+  buffer?: ArrayBuffer | Uint8Array;
+}
+
+export interface CadMissingReference {
+  kind: 'shx';
+  fileName: string;
+  identified: boolean;
+  reason: 'not-loaded' | 'incompatible';
+}
+
+export interface CadLoadedReference {
+  kind: 'shx';
+  fileName: string;
+  bytes: number;
+  fontType: 'shapes' | 'bigfont' | 'unifont';
+  glyphCount: number;
+}
+
+export interface CadReferenceState {
+  missing: CadMissingReference[];
+  loaded: CadLoadedReference[];
 }
 
 export type CadLoadProgressPhase =

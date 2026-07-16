@@ -12,6 +12,14 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 
 > DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.7.0
+
+- Corrected block-contained DWG geometry after PLAN/UCS transforms, including canonical insert/text rotations, closed-polyline fallback detection and authored constant/vertex widths.
+- Preserved TEXT width factors, alignment points, vertical/horizontal alignment and generation flags through worker normalization and INSERT expansion.
+- Added world-space wide-polyline rendering to Canvas2D and retained WebGL, while keeping dash phase and entity/INSERT linetype scales stable.
+- Added complete external SHX reference handling for complex DWG linetypes: referenced files are exposed through metadata, missing files use a safe marker fallback, and uploaded `File`/`ArrayBuffer` content is parsed, validated, cached and redrawn as real shape/text outlines without resetting the current view.
+- Added `onReferenceStateChange`, `addReferenceFile()`, `addReferenceBuffer()`, `getMissingReferences()` and related lifecycle APIs, plus a contextual SHX upload control in the demo.
+
 ## What changed in 0.6.6
 
 - Added automatic initial fitting based on meaningful geometry inside a valid active DWG viewport, preventing remote coordinate clusters from shrinking the main drawing into a dot.
@@ -98,7 +106,8 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 - **Pure frontend viewer component**: `new CadViewer({ container })` or `new CadViewer({ canvas })`.
 - **Loader registry**: DWG, DXF and DWF loaders are independent and replaceable; native-renderable loaders can mount their own optimized viewer.
 - **DWG preview**: browser-local parsing through LibreDWG WebAssembly, executed in a Web Worker by default.
-- **DWG view and linetype fidelity**: active planar saved views, closed polylines, LTYPE tables, BYLAYER/BYBLOCK inheritance, dash/dot patterns and stable pattern scaling.
+- **DWG view and linetype fidelity**: active planar saved views, block-contained text alignment and widths, closed/wide polylines, LTYPE tables, BYLAYER/BYBLOCK inheritance, dash/dot patterns and stable pattern scaling.
+- **External SHX references**: detects missing complex-linetype shape fonts, accepts local files or API-provided bytes, validates required glyphs and renders SHX shape/text geometry in Canvas2D and WebGL.
 - **DXF preview**: JavaScript parser path with fallback support for common ASCII DXF `ENTITIES`.
 - **DWF/DWFx/XPS preview**: powered by `dwf-viewer` for DWF ZIP packages, WebGL-accelerated W2D and XPS/DWFx 2D vectors, W3D/HSF eModel geometry, embedded XPS fonts, adaptive CAD line weights and raster fallback.
 - **CAD color handling**: ACI, BYLAYER, BYBLOCK inheritance, DWG layer colors, true color, fill color, opacity and adaptive contrast.
@@ -299,11 +308,16 @@ const viewer = new CadViewer({
   onLoad(result) {},
   onError(error) {},
   onRenderStats(stats) {},
-  onViewChange(event) {}
+  onViewChange(event) {},
+  onReferenceStateChange(state) {} // missing/loaded external SHX resources
 });
 
 await viewer.loadFile(file);
 await viewer.loadBuffer(arrayBuffer, 'drawing.dxf');
+await viewer.addReferenceFile(shxFile);
+await viewer.addReferenceBuffer(shxArrayBuffer, 'LSG.SHX');
+viewer.getMissingReferences();      // CadMissingReference[]
+viewer.getLoadedReferences();       // CadLoadedReference[]
 viewer.fit();                       // automatic meaningful-content fit
 viewer.fit('saved-view');          // exact active DWG viewport
 viewer.fit('extents');             // all geometry, including remote coordinate clusters
@@ -316,6 +330,30 @@ viewer.getSourceDocument();      // parser-owned WCS CadDocument
 viewer.clear();
 viewer.destroy();
 ```
+
+### External SHX references
+
+Complex DWG linetypes reference SHX shape/font files by name; their outlines are not embedded in the drawing. `CadViewer` keeps the drawing usable with a marker fallback and reports missing resources through both `onReferenceStateChange` and `document.metadata.missingReferences`.
+
+```ts
+const viewer = new CadViewer({
+  container,
+  onReferenceStateChange({ missing }) {
+    shxUploadButton.hidden = missing.length === 0;
+    shxUploadButton.textContent = missing.map(({ fileName }) => fileName).join(', ');
+  }
+});
+
+await viewer.loadFile(dwgFile);
+
+// User-selected local file.
+await viewer.addReferenceFile(shxFile);
+
+// Or bytes supplied by an application API. Keep the referenced file name.
+await viewer.addReferenceBuffer(shxBytes, 'LSG.SHX');
+```
+
+References can be supplied before or after the drawing. Parsed fonts remain cached across drawing loads until `removeReference()`, `clearReferences()` or `destroy()` is called. Replacing a reference validates the glyphs required by the active drawing; a same-named but incompatible file remains in the missing state. All parsing stays in the browser.
 
 ## Loader architecture
 
@@ -377,7 +415,7 @@ viewer.registerLoader({
 
 | Format | Loader | Coverage |
 |---|---|---|
-| DWG | `DwgLoader` | Uses LibreDWG WebAssembly. Preserves active planar saved views, closed polylines and LTYPE definitions; Canvas2D/WebGL render dash/dot patterns with BYLAYER/BYBLOCK inheritance. Complex SHX glyphs use a marker approximation. |
+| DWG | `DwgLoader` | Uses LibreDWG WebAssembly. Preserves active planar saved views, block-contained text transforms/alignment, closed and authored-width polylines, and LTYPE definitions. Canvas2D/WebGL render dash/dot patterns with BYLAYER/BYBLOCK inheritance. Referenced SHX fonts are reported as missing resources; supplied files render complex shape/text glyphs with authored scale, offset and rotation, while unavailable glyphs use a marker fallback. |
 | DXF | `DxfLoader` | Uses `dxf-parser` plus fallback parsing. Supports codepage-aware text decoding, CAD text escape normalization, core entities, blocks/inserts, colors/layers, polylines, hatch boundaries and splines as preview polylines. |
 | DWF | `DwfLoader` + `dwf-viewer` | DWF 6+ ZIP packages, WHIP/W2D 2D sheets, W3D/HSF 3D eModel pages, model tree metadata, WebGL rendering and optional WASM fallback. |
 | DWFx / XPS | `DwfLoader` + `dwf-viewer` | DWFx/OPC/XPS pages with WebGL-accelerated vector paths, embedded fonts, text, images, package resources and adaptive overview line weights through the native DWF renderer. |
@@ -474,4 +512,4 @@ public/wasm/     demo WASM asset output directory
 
 ## License
 
-AGPL-3.0-only. The default DWG loader integrates `@mlightcad/libredwg-web` / LibreDWG, and the DWF renderer integrates `dwf-viewer`. Keep attribution and license notices when redistributing, modifying, embedding or using this package as part of another application. For closed-source commercial products, review all dependency licenses and replace loaders where your licensing model requires it.
+AGPL-3.0-only. The default DWG loader integrates `@mlightcad/libredwg-web` / LibreDWG, SHX decoding uses the MIT-licensed `@mlightcad/shx-parser`, and the DWF renderer integrates `dwf-viewer`. Keep attribution and license notices when redistributing, modifying, embedding or using this package as part of another application. For closed-source commercial products, review all dependency licenses and replace loaders where your licensing model requires it.

@@ -63,6 +63,12 @@ function libredwgRuntimePatchPlugin(): Plugin {
       next = next.replace(/new URL\((['"])libredwg-web\.wasm\1\s*,\s*import\.meta\.url\)/g, 'new URL(/* @vite-ignore */ $1libredwg-web.wasm$1, import.meta.url)');
       // Extra guard for the upstream package root, which embeds a data: wasm URL.
       next = next.replace(/new URL\((['"])data:application\/wasm;base64,/g, 'new URL(/* @vite-ignore */ $1data:application/wasm;base64,');
+      // libredwg-web 0.7.x leaves LTYPE dash STYLE pointers as a TODO. Preserve
+      // the absolute handle so normalization can resolve the referenced SHX.
+      next = next.replace(
+        /\s*\/\/ TODO: convert style handle to style object id\s*\/\/ styleObjectId: dash\.style,/,
+        '\n                styleObjectId: dash.style ? idToString(this.libredwg.dwg_ref_get_absref(dash.style)) : undefined,'
+      );
       return next === code ? null : { code: next, map: null };
     }
   };

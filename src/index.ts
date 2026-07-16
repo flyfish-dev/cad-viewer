@@ -8,12 +8,14 @@ export type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } fro
 
 export { CadLoaderRegistry, createDefaultLoaderRegistry, DwgLoader, DwgWorkerClient, DxfLoader, DwfLoader, supportsDwgWorker } from './loaders';
 
-export { createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadEntity, summarizeCadDocument } from './core/entity';
+export { cadEntityWorldStrokeWidth, createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadEntity, summarizeCadDocument } from './core/entity';
 export { computeCadDocumentBounds, resolveCadFitBounds, resolveCadSavedViewBounds } from './core/bounds';
 export type { CadBoundsOptions } from './core/bounds';
 export { createCadSceneDocument } from './core/scene';
-export { applyByBlockLineTypeInheritance, createDashedCadPrimitives, createDashedCadSegments, resolveCadLinePattern, resolveCadLineTypeReference } from './core/linetype';
-export type { CadDashedPrimitives, ResolvedCadLinePattern, ResolvedCadLinePatternRun } from './core/linetype';
+export { applyByBlockLineTypeInheritance, createDashedCadPrimitives, createDashedCadSegments, resolveCadLinePattern, resolveCadLineTypeReference, transformCadLineTypeGlyph } from './core/linetype';
+export type { CadDashedPrimitives, CadLineTypeMarker, ResolvedCadLinePattern, ResolvedCadLinePatternRun } from './core/linetype';
+export { CadShxFontRegistry } from './core/shx';
+export type { CadShxGlyph, CadShxGlyphResolver } from './core/shx';
 export { normalizeDwgDatabase } from './loaders/dwg/DwgParser';
 export { detectCadFormat, readInputBytes } from './core/format';
 export { isCadNativeRenderableLoader } from './core/types';
@@ -30,6 +32,7 @@ export type {
   CadLayer,
   CadLineType,
   CadLineTypeElement,
+  CadLoadedReference,
   CadLoadInput,
   CadLoadOptions,
   CadLoadProgress,
@@ -37,11 +40,14 @@ export type {
   CadLoadResult,
   CadLoader,
   CadNativeRenderableLoader,
+  CadMissingReference,
   CadPage,
   CadPathCommand,
   CadPoint,
   CadPoint2D,
   CadPoint3D,
+  CadReferenceInput,
+  CadReferenceState,
   CadSavedView,
   CadSceneTransform2D,
   CadSummary

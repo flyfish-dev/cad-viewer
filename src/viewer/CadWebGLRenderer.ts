@@ -1,9 +1,10 @@
 import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor } from '../core/color';
 import { computeCadDocumentBounds, resolveCadFitBounds } from '../core/bounds';
 import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includePoint, isFinitePoint, stripMTextFormatting, xy } from '../core/geometry';
-import { inferEntityKind, isCadPolylineClosed } from '../core/entity';
-import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern } from '../core/linetype';
+import { cadEntityWorldStrokeWidth, inferEntityKind, isCadPolylineClosed } from '../core/entity';
+import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern, transformCadLineTypeGlyph, type CadLineTypeMarker } from '../core/linetype';
 import { createCadSceneDocument } from '../core/scene';
+import { EMPTY_SHX_GLYPH_RESOLVER, type CadShxGlyph } from '../core/shx';
 import { matrixFromInsert, transformEntity } from '../core/transform';
 import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
 import type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './CadCanvasRenderer';
@@ -34,6 +35,10 @@ interface TextItem {
   text: string;
   height: number;
   rotation: number;
+  xScale: number;
+  generationFlag: number;
+  halign: number;
+  valign: number;
   color: string;
   opacity: number;
   bounds: CadBounds;
@@ -108,7 +113,8 @@ const DEFAULT_WEBGL_OPTIONS: Required<CanvasViewerOptions> = {
   powerPreference: 'high-performance',
   antialias: true,
   preserveDrawingBuffer: false,
-  enableSpatialIndex: true
+  enableSpatialIndex: true,
+  shxGlyphResolver: EMPTY_SHX_GLYPH_RESOLVER
 };
 
 export class CadWebGLRenderer {
@@ -186,6 +192,20 @@ export class CadWebGLRenderer {
     this.scene = uploadScene(this.gl, cpuScene);
     this.stats = createStatsFromScene(this.scene, 0);
     this.fitToView();
+  }
+
+  refreshReferences(): void {
+    if (!this.document) return;
+    const view = { ...this.view };
+    const fitScale = this.fitScale;
+    this.disposeScene();
+    const cpuScene = buildCpuScene(this.document, this.opts, this.bounds);
+    this.scene = uploadScene(this.gl, cpuScene);
+    this.stats = createStatsFromScene(this.scene, 0);
+    this.view = view;
+    this.fitScale = fitScale;
+    this.render();
+    this.emitViewChange();
   }
 
   getDocument(): CadDocument | undefined {
@@ -430,11 +450,13 @@ export class CadWebGLRenderer {
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(-item.rotation);
+      ctx.scale((item.generationFlag & 2 ? -1 : 1) * item.xScale, item.generationFlag & 4 ? -1 : 1);
       const fontSize = Math.max(4, Math.min(256, pixelHeight));
       ctx.font = `${fontSize}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       ctx.fillStyle = item.color;
       ctx.globalAlpha = item.opacity;
-      ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = item.halign === 1 || item.halign === 4 ? 'center' : item.halign === 2 ? 'right' : 'left';
+      ctx.textBaseline = item.valign === 1 ? 'bottom' : item.valign === 2 ? 'middle' : item.valign === 3 ? 'top' : 'alphabetic';
       for (const [index, line] of item.text.split(/\r?\n/g).entries()) ctx.fillText(line, 0, index * fontSize * 1.22);
       ctx.restore();
       drawn++;
@@ -867,21 +889,30 @@ class CpuSceneBuilder {
   }
 
   private addTextEntity(e: CadEntity): void {
-    const p = (e.insertionPoint ?? e.startPoint ?? e.center) as CadPoint3D | undefined;
+    const halign = Number(e.halign ?? 0);
+    const valign = Number(e.valign ?? 0);
+    const aligned = (halign !== 0 || valign !== 0) && isFinitePoint(e.endPoint);
+    const p = (aligned ? e.endPoint : e.insertionPoint ?? e.startPoint ?? e.center) as CadPoint3D | undefined;
     const text = stripMTextFormatting(String(e.text ?? e.value ?? ''));
     const height = Number(e.textHeight ?? e.height ?? 1);
     if (!isFinitePoint(p) || !text || !Number.isFinite(height)) return this.markSkipped(String(e.type));
     const point = xy(p);
-    const approxWidth = Math.max(1, text.split(/\r?\n/g).reduce((max, line) => Math.max(max, line.length), 0)) * Math.abs(height) * 0.62;
+    const xScale = Number(e.xScale ?? 1);
+    const safeXScale = Number.isFinite(xScale) && Math.abs(xScale) > 1e-9 ? Math.abs(xScale) : 1;
+    const approxWidth = Math.max(1, text.split(/\r?\n/g).reduce((max, line) => Math.max(max, line.length), 0)) * Math.abs(height) * 0.62 * safeXScale;
     const approxHeight = Math.max(1, text.split(/\r?\n/g).length) * Math.abs(height) * 1.22;
     this.textItems.push({
       point,
       text,
       height,
       rotation: Number(e.rotation ?? 0),
+      xScale: safeXScale,
+      generationFlag: Number(e.generationFlag ?? 0),
+      halign,
+      valign,
       color: resolveCadColor(e, this.document, this.colorOptions()),
       opacity: clamp(Number(e.opacity ?? 1), 0, 1),
-      bounds: { minX: point.x - approxWidth * 0.1, minY: point.y - approxHeight, maxX: point.x + approxWidth, maxY: point.y + approxHeight }
+      bounds: { minX: point.x - approxWidth, minY: point.y - approxHeight, maxX: point.x + approxWidth, maxY: point.y + approxHeight }
     });
     this.stats.drawn++;
   }
@@ -977,15 +1008,73 @@ class CpuSceneBuilder {
   private addPolyline(points: CadPoint2D[], closed: boolean, color: RgbaBytes, entity?: CadEntity): void {
     const valid = points.filter(isFinitePoint).map(xy);
     if (valid.length < 2) return;
+    if (closed && pointsEqual(valid[0], valid[valid.length - 1])) valid.pop();
+    if (valid.length < 2) return;
+    const worldWidth = entity ? cadEntityWorldStrokeWidth(entity) : 0;
     const pattern = entity ? resolveCadLinePattern(entity, this.document) : undefined;
     if (pattern) {
       const primitives = createDashedCadPrimitives(valid, closed, pattern);
-      for (const [start, end] of primitives.segments) this.addSegment(start, end, color);
-      for (const point of primitives.dots) this.addLineTypePoint(point, color);
+      const fallbackDots = [...primitives.dots];
+      for (const [start, end] of primitives.segments) {
+        this.addSegment(start, end, color);
+        if (worldWidth > 1e-9) this.addWideSegment(start, end, worldWidth, color, true);
+      }
+      for (const marker of primitives.markers ?? []) {
+        const glyph = this.resolveLineTypeGlyph(marker);
+        if (!glyph) continue;
+        removeMatchingPoint(fallbackDots, marker.fallbackPoint);
+        let added = false;
+        for (const polyline of transformCadLineTypeGlyph(marker, glyph)) {
+          for (let index = 0; index < polyline.length - 1; index++) {
+            this.addSegment(polyline[index], polyline[index + 1], color);
+            added = true;
+          }
+        }
+        if (!added) fallbackDots.push(marker.point);
+      }
+      for (const point of fallbackDots) this.addLineTypePoint(point, color);
       return;
     }
     for (let i = 0; i < valid.length - 1; i++) this.addSegment(valid[i], valid[i + 1], color);
     if (closed) this.addSegment(valid[valid.length - 1], valid[0], color);
+    if (worldWidth > 1e-9) this.addWidePolyline(valid, closed, worldWidth, color);
+  }
+
+  private addWidePolyline(points: CadPoint2D[], closed: boolean, width: number, color: RgbaBytes): void {
+    for (let index = 0; index < points.length - 1; index++) this.addWideSegment(points[index], points[index + 1], width, color, false);
+    if (closed) this.addWideSegment(points[points.length - 1], points[0], width, color, false);
+    for (const point of points) this.addWideDisc(point, width / 2, color);
+  }
+
+  private addWideSegment(a: CadPoint2D, b: CadPoint2D, width: number, color: RgbaBytes, roundCaps: boolean): void {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (!Number.isFinite(length) || length <= 1e-14) return;
+    const half = Math.abs(width) / 2;
+    const nx = -dy / length * half;
+    const ny = dx / length * half;
+    this.addTriangleFan([
+      { x: a.x + nx, y: a.y + ny },
+      { x: b.x + nx, y: b.y + ny },
+      { x: b.x - nx, y: b.y - ny },
+      { x: a.x - nx, y: a.y - ny }
+    ], color);
+    if (roundCaps) {
+      this.addWideDisc(a, half, color);
+      this.addWideDisc(b, half, color);
+    }
+  }
+
+  private addWideDisc(center: CadPoint2D, radius: number, color: RgbaBytes): void {
+    if (!Number.isFinite(radius) || radius <= 1e-9) return;
+    const ring: CadPoint2D[] = [];
+    const segments = 8;
+    for (let index = 0; index < segments; index++) {
+      const angle = index / segments * Math.PI * 2;
+      ring.push({ x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius });
+    }
+    this.addTriangleFan([center, ...ring, ring[0]], color);
   }
 
   private addSegment(a: CadPoint2D, b: CadPoint2D, color: RgbaBytes): void {
@@ -1010,6 +1099,12 @@ class CpuSceneBuilder {
     pushVertex(bucket, p, color, this.origin);
     bucket.primitiveCount++;
     this.primitiveCount++;
+  }
+
+  private resolveLineTypeGlyph(marker: CadLineTypeMarker): CadShxGlyph | undefined {
+    return marker.kind === 'shape'
+      ? this.opts.shxGlyphResolver.resolveShape(Number(marker.shapeNumber), marker.fontName)
+      : this.opts.shxGlyphResolver.resolveText(String(marker.text ?? ''), marker.fontName);
   }
 
   private addTriangleFan(points: CadPoint2D[], color: RgbaBytes): void {
@@ -1185,6 +1280,16 @@ function boundsFromPoints(points: CadPoint2D[]): CadBounds {
   return bounds;
 }
 
+function pointsEqual(a: CadPoint2D, b: CadPoint2D): boolean {
+  const extent = Math.max(1, Math.abs(a.x), Math.abs(a.y), Math.abs(b.x), Math.abs(b.y));
+  return Math.hypot(a.x - b.x, a.y - b.y) <= Math.max(1e-9, extent * 1e-12);
+}
+
+function removeMatchingPoint(points: CadPoint2D[], target: CadPoint2D): void {
+  const index = points.findIndex((point) => pointsEqual(point, target));
+  if (index >= 0) points.splice(index, 1);
+}
+
 function pointBounds(point: CadPoint2D): CadBounds {
   return { minX: point.x, minY: point.y, maxX: point.x, maxY: point.y };
 }
@@ -1203,7 +1308,8 @@ function requiresSceneRebuild(current: Required<CanvasViewerOptions>, next: Canv
     || next.maxCurveSegments !== undefined && next.maxCurveSegments !== current.maxCurveSegments
     || next.spatialIndexCellCount !== undefined && next.spatialIndexCellCount !== current.spatialIndexCellCount
     || next.maxVerticesPerBatch !== undefined && next.maxVerticesPerBatch !== current.maxVerticesPerBatch
-    || next.enableSpatialIndex !== undefined && next.enableSpatialIndex !== current.enableSpatialIndex;
+    || next.enableSpatialIndex !== undefined && next.enableSpatialIndex !== current.enableSpatialIndex
+    || next.shxGlyphResolver !== undefined && next.shxGlyphResolver !== current.shxGlyphResolver;
 }
 
 function createStatsFromScene(scene: GpuScene, renderElapsedMs: number): RenderStats {

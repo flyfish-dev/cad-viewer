@@ -1,7 +1,8 @@
 import { createDefaultLoaderRegistry } from '../loaders';
 import type { CadLoaderRegistry } from '../loaders/CadLoaderRegistry';
 import { summarizeCadDocument } from '../core/entity';
-import { isCadNativeRenderableLoader, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadNativeRenderableLoader } from '../core/types';
+import { CadShxFontRegistry, synchronizeCadDocumentReferences, type CadShxGlyphResolver } from '../core/shx';
+import { isCadNativeRenderableLoader, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadedReference, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadMissingReference, type CadNativeRenderableLoader, type CadReferenceInput, type CadReferenceState } from '../core/types';
 import { CadCanvasRenderer, type CanvasViewerOptions, type RenderStats, type ViewChangeEvent } from './CadCanvasRenderer';
 import { CadWebGLRenderer, isWebGLAvailable } from './CadWebGLRenderer';
 
@@ -25,6 +26,7 @@ export interface CadViewerOptions extends CadLoadOptions {
   onError?: (error: Error) => void;
   onRenderStats?: (stats: RenderStats) => void;
   onViewChange?: (event: ViewChangeEvent) => void;
+  onReferenceStateChange?: (state: CadReferenceState) => void;
 }
 
 export interface CadViewerLoadResult extends CadLoadResult {
@@ -38,11 +40,21 @@ export class CadViewer {
   readonly registry: CadLoaderRegistry;
   readonly nativeHost?: HTMLElement;
   private readonly options: Required<Pick<CadViewerOptions, 'autoFit'>> & CadViewerOptions;
+  private readonly referenceRegistry = new CadShxFontRegistry();
+  private readonly shxGlyphResolver: CadShxGlyphResolver;
+  private externalShxGlyphResolver?: CadShxGlyphResolver;
   private lastResult?: CadViewerLoadResult;
   private activeNativeLoader?: CadNativeRenderableLoader;
 
   constructor(options: CadViewerOptions = {}) {
     this.options = { autoFit: true, ...options };
+    this.externalShxGlyphResolver = options.canvasOptions?.shxGlyphResolver;
+    this.shxGlyphResolver = {
+      resolveShape: (shapeNumber, fontName) => this.referenceRegistry.resolveShape(shapeNumber, fontName)
+        ?? this.externalShxGlyphResolver?.resolveShape(shapeNumber, fontName),
+      resolveText: (value, fontName) => this.referenceRegistry.resolveText(value, fontName)
+        ?? this.externalShxGlyphResolver?.resolveText(value, fontName)
+    };
     this.registry = options.registry ?? createDefaultLoaderRegistry(options);
     if (options.loaders) for (const loader of options.loaders) this.registry.register(loader);
 
@@ -71,7 +83,10 @@ export class CadViewer {
       this.nativeHost = host;
     }
 
-    this.renderer = createRenderer(options.renderer ?? 'auto', this.canvas, options.canvasOptions);
+    this.renderer = createRenderer(options.renderer ?? 'auto', this.canvas, {
+      ...options.canvasOptions,
+      shxGlyphResolver: this.shxGlyphResolver
+    });
     this.renderer.onStats = (stats) => this.options.onRenderStats?.(stats);
     this.renderer.onViewChange = (event) => this.options.onViewChange?.(event);
   }
@@ -96,8 +111,52 @@ export class CadViewer {
     return this.loadThroughRegistry(input, options, input.fileName ?? input.file?.name);
   }
 
+  async addReference(input: CadReferenceInput): Promise<CadLoadedReference> {
+    try {
+      const loaded = await this.referenceRegistry.add(input);
+      this.refreshCurrentReferences();
+      return loaded;
+    } catch (error) {
+      const normalized = normalizeError(error);
+      this.options.onError?.(normalized);
+      throw normalized;
+    }
+  }
+
+  async addReferenceFile(file: File): Promise<CadLoadedReference> {
+    return this.addReference({ file, fileName: file.name });
+  }
+
+  async addReferenceBuffer(buffer: ArrayBuffer | Uint8Array, fileName: string): Promise<CadLoadedReference> {
+    return this.addReference({ buffer, fileName });
+  }
+
+  removeReference(fileName: string): boolean {
+    const removed = this.referenceRegistry.remove(fileName);
+    if (removed) this.refreshCurrentReferences();
+    return removed;
+  }
+
+  clearReferences(): void {
+    this.referenceRegistry.clear();
+    this.refreshCurrentReferences();
+  }
+
+  getReferenceState(): CadReferenceState {
+    return this.referenceRegistry.getState();
+  }
+
+  getMissingReferences(): CadMissingReference[] {
+    return this.getReferenceState().missing;
+  }
+
+  getLoadedReferences(): CadLoadedReference[] {
+    return this.getReferenceState().loaded;
+  }
+
   setDocument(document: CadDocument, fileName?: string): CadViewerLoadResult {
     this.deactivateNativeRenderer();
+    this.activateDocumentReferences(document);
     const result: CadViewerLoadResult = {
       document,
       raw: document.raw,
@@ -137,7 +196,8 @@ export class CadViewer {
 
   setCanvasOptions(options: CanvasViewerOptions): void {
     this.options.canvasOptions = { ...(this.options.canvasOptions ?? {}), ...options };
-    this.renderer.setOptions(options);
+    if (options.shxGlyphResolver) this.externalShxGlyphResolver = options.shxGlyphResolver;
+    this.renderer.setOptions({ ...options, shxGlyphResolver: this.shxGlyphResolver });
     if (this.activeNativeLoader) {
       this.activeNativeLoader.setNativeOptions?.({
         ...this.mergeLoadOptions({}),
@@ -156,6 +216,8 @@ export class CadViewer {
     this.lastResult = undefined;
     this.deactivateNativeRenderer();
     this.renderer.clear();
+    this.referenceRegistry.setDocument(undefined);
+    this.emitReferenceState();
   }
 
   destroy(): void {
@@ -166,6 +228,7 @@ export class CadViewer {
       maybeDisposable.unmount?.();
       maybeDisposable.destroy?.();
     }
+    this.referenceRegistry.clear();
     this.renderer.destroy();
   }
 
@@ -196,6 +259,8 @@ export class CadViewer {
   private applyLoadResult(result: CadLoadResult, fileName?: string): CadViewerLoadResult {
     this.deactivateNativeRenderer();
     this.options.onLoadProgress?.({ phase: 'render', format: result.format, message: 'Rendering normalized CAD scene…', percent: 96 });
+    this.activateDocumentReferences(result.document);
+    result.warnings = result.document.warnings;
     this.renderer.setDocument(result.document);
     if (!this.options.autoFit) this.renderer.render();
     const value: CadViewerLoadResult = {
@@ -222,6 +287,8 @@ export class CadViewer {
     try {
       const result = await loader.mount(input, this.nativeHost, options);
       throwIfAborted(options.signal);
+      this.activateDocumentReferences(result.document);
+      result.warnings = result.document.warnings;
       const value: CadViewerLoadResult = {
         ...result,
         fileName,
@@ -284,6 +351,28 @@ export class CadViewer {
         if (overrideProgress && overrideProgress !== baseProgress) overrideProgress(progress);
       }
     };
+  }
+
+  private activateDocumentReferences(document: CadDocument): void {
+    this.referenceRegistry.setDocument(document);
+    synchronizeCadDocumentReferences(document, this.referenceRegistry.getState());
+    this.emitReferenceState();
+  }
+
+  private refreshCurrentReferences(): void {
+    const document = this.lastResult?.document;
+    if (document) {
+      this.referenceRegistry.setDocument(document);
+      synchronizeCadDocumentReferences(document, this.referenceRegistry.getState());
+      this.lastResult!.warnings = document.warnings;
+      this.lastResult!.summary = summarizeCadDocument(document);
+      if (!this.activeNativeLoader) this.renderer.refreshReferences();
+    }
+    this.emitReferenceState();
+  }
+
+  private emitReferenceState(): void {
+    this.options.onReferenceStateChange?.(this.referenceRegistry.getState());
   }
 }
 

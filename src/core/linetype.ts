@@ -1,4 +1,5 @@
 import type { CadDocument, CadEntity, CadLayer, CadLineType, CadPoint2D } from './types';
+import type { CadShxGlyph } from './shx';
 
 export interface ResolvedCadLinePattern {
   name: string;
@@ -15,11 +16,28 @@ export interface ResolvedCadLinePatternRun {
   length: number;
   /** Render a screen-space dot as a fallback for a DXF dot or unavailable SHX glyph. */
   marker: boolean;
+  /** Source LTYPE element retained for complex shape/text placement. */
+  element?: CadLineType['pattern'][number];
+  /** Combined drawing, global and entity linetype scale. */
+  globalScale: number;
+}
+
+export interface CadLineTypeMarker {
+  kind: 'shape' | 'text';
+  /** Unshifted event point used by the legacy dot fallback. */
+  fallbackPoint: CadPoint2D;
+  point: CadPoint2D;
+  angle: number;
+  scale: number;
+  shapeNumber?: number;
+  text?: string;
+  fontName?: string;
 }
 
 export interface CadDashedPrimitives {
   segments: Array<readonly [CadPoint2D, CadPoint2D]>;
   dots: CadPoint2D[];
+  markers?: CadLineTypeMarker[];
 }
 
 const DEFAULT_MAX_DASH_PRIMITIVES = 100_000;
@@ -126,6 +144,11 @@ export function createDashedCadPrimitives(
     remaining = pattern.runs[runIndex].length;
     markerPending = true;
   };
+  const addMarker = (run: ResolvedCadLinePatternRun, point: CadPoint2D, dx: number, dy: number, edgeLength: number) => {
+    const marker = createLineTypeMarker(run, point, dx / edgeLength, dy / edgeLength);
+    addDot(point);
+    if (marker) (output.markers ??= []).push(marker);
+  };
   for (const [start, end] of edges) {
     const dx = end.x - start.x;
     const dy = end.y - start.y;
@@ -138,7 +161,9 @@ export function createDashedCadPrimitives(
         const run = pattern.runs[runIndex];
         if (markerPending && run.marker) {
           const ratio = offset / length;
-          addDot({ x: start.x + dx * ratio, y: start.y + dy * ratio });
+          const point = { x: start.x + dx * ratio, y: start.y + dy * ratio };
+          if (isComplexRun(run)) addMarker(run, point, dx, dy, length);
+          else addDot(point);
         }
         advance();
         zeroRunCount++;
@@ -148,7 +173,9 @@ export function createDashedCadPrimitives(
       if (markerPending) {
         if (run.marker) {
           const ratio = offset / length;
-          addDot({ x: start.x + dx * ratio, y: start.y + dy * ratio });
+          const point = { x: start.x + dx * ratio, y: start.y + dy * ratio };
+          if (isComplexRun(run)) addMarker(run, point, dx, dy, length);
+          else addDot(point);
         }
         markerPending = false;
       }
@@ -180,9 +207,68 @@ function patternRuns(definition: CadLineType, scale: number): ResolvedCadLinePat
     // Group 49 keeps its sign semantics even when group 74 attaches a shape
     // or text glyph: positive is a baseline dash, negative is a gap and zero
     // is a dot. The glyph is an additional marker, not a replacement dash.
-    out.push({ draw: length >= 0, length: Math.abs(length) * scale, marker: length >= 0 && (length === 0 || complex) });
+    out.push({
+      draw: length >= 0,
+      length: Math.abs(length) * scale,
+      marker: length >= 0 && (length === 0 || complex),
+      element,
+      globalScale: scale
+    });
   }
   return out;
+}
+
+export function transformCadLineTypeGlyph(marker: CadLineTypeMarker, glyph: CadShxGlyph): CadPoint2D[][] {
+  const cosine = Math.cos(marker.angle);
+  const sine = Math.sin(marker.angle);
+  return glyph.polylines.map((polyline) => polyline.map((point) => {
+    const x = point.x * marker.scale;
+    const y = point.y * marker.scale;
+    return {
+      x: marker.point.x + x * cosine - y * sine,
+      y: marker.point.y + x * sine + y * cosine
+    };
+  }));
+}
+
+function isComplexRun(run: ResolvedCadLinePatternRun): boolean {
+  return Number(run.element?.elementTypeFlag ?? 0) !== 0;
+}
+
+function createLineTypeMarker(
+  run: ResolvedCadLinePatternRun,
+  point: CadPoint2D,
+  tangentX: number,
+  tangentY: number
+): CadLineTypeMarker | undefined {
+  const element = run.element;
+  const flag = Number(element?.elementTypeFlag ?? 0);
+  if (!element || flag === 0) return undefined;
+
+  const offsetX = finiteNumber(element.offsetX, 0) * run.globalScale;
+  const offsetY = finiteNumber(element.offsetY, 0) * run.globalScale;
+  const rotation = finiteNumber(element.rotation, 0);
+  const tangentAngle = Math.atan2(tangentY, tangentX);
+  const markerPoint = {
+    x: point.x + tangentX * offsetX - tangentY * offsetY,
+    y: point.y + tangentY * offsetX + tangentX * offsetY
+  };
+  const common = {
+    fallbackPoint: point,
+    point: markerPoint,
+    angle: (flag & 1) === 1 ? rotation : tangentAngle + rotation,
+    scale: Math.abs(finiteNumber(element.scale, 1) * run.globalScale),
+    fontName: element.fontName
+  };
+
+  const shapeNumber = Number(element.shapeNumber);
+  if ((flag & 4) === 4 && Number.isFinite(shapeNumber)) {
+    return { ...common, kind: 'shape', shapeNumber: Math.trunc(shapeNumber) };
+  }
+  if ((flag & 2) === 2 && element.text) {
+    return { ...common, kind: 'text', text: element.text };
+  }
+  return undefined;
 }
 
 function canvasDashSegments(runs: ResolvedCadLinePatternRun[], hasGap: boolean): number[] {
@@ -222,4 +308,9 @@ function lookupLayer(document: CadDocument | undefined, name: string | undefined
 function finitePositive(value: unknown, fallback: number): number {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }

@@ -1,9 +1,10 @@
 import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor, type CadColorContrastMode } from '../core/color';
 import { computeCadDocumentBounds, resolveCadFitBounds } from '../core/bounds';
 import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, isFinitePoint, stripMTextFormatting, xy } from '../core/geometry';
-import { inferEntityKind, isCadPolylineClosed } from '../core/entity';
-import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern } from '../core/linetype';
+import { cadEntityWorldStrokeWidth, inferEntityKind, isCadPolylineClosed } from '../core/entity';
+import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern, transformCadLineTypeGlyph, type CadLineTypeMarker } from '../core/linetype';
 import { createCadSceneDocument } from '../core/scene';
+import { EMPTY_SHX_GLYPH_RESOLVER, type CadShxGlyph, type CadShxGlyphResolver } from '../core/shx';
 import { matrixFromInsert, transformEntity } from '../core/transform';
 import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
 
@@ -41,6 +42,8 @@ export interface CanvasViewerOptions {
   preserveDrawingBuffer?: boolean;
   /** WebGL renderer: use retained, spatially culled GPU batches. */
   enableSpatialIndex?: boolean;
+  /** Advanced renderer hook. CadViewer supplies this automatically for uploaded SHX references. */
+  shxGlyphResolver?: CadShxGlyphResolver;
 }
 
 export interface ViewState {
@@ -100,7 +103,8 @@ const DEFAULT_OPTIONS: Required<CanvasViewerOptions> = {
   powerPreference: 'high-performance',
   antialias: true,
   preserveDrawingBuffer: false,
-  enableSpatialIndex: true
+  enableSpatialIndex: true,
+  shxGlyphResolver: EMPTY_SHX_GLYPH_RESOLVER
 };
 
 export class CadCanvasRenderer {
@@ -156,6 +160,11 @@ export class CadCanvasRenderer {
     this.document = createCadSceneDocument(document);
     this.bounds = computeCadDocumentBounds(this.document, this.boundsOptions());
     this.fitToView();
+  }
+
+  refreshReferences(): void {
+    this.render();
+    this.emitViewChange();
   }
 
   getDocument(): CadDocument | undefined {
@@ -383,8 +392,9 @@ export class CadCanvasRenderer {
     ctx.globalAlpha = clamp(Number(entity.opacity ?? 1), 0, 1);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    const lw = typeof entity.lineweight === 'number' && entity.lineweight > 0 ? entity.lineweight : 0;
-    ctx.lineWidth = Math.max(1, Math.min(12, lw > 0 ? lw / 30 : 1));
+    const lineweightPixels = typeof entity.lineweight === 'number' && entity.lineweight > 0 ? entity.lineweight / 30 : 1;
+    const worldWidthPixels = cadEntityWorldStrokeWidth(entity) * Math.abs(this.view.scale);
+    ctx.lineWidth = Math.max(1, Math.min(256, Math.max(lineweightPixels, Number.isFinite(worldWidthPixels) ? worldWidthPixels : 0)));
     const linePattern = applyLinePattern ? resolveCadLinePattern(entity, this.document) : undefined;
     ctx.setLineDash(linePattern
       ? linePattern.segments.map((length) => Math.max(0.05, length * this.view.scale))
@@ -458,7 +468,8 @@ export class CadCanvasRenderer {
   }
 
   private drawText(e: CadEntity): void {
-    const p = (e.insertionPoint ?? e.startPoint ?? e.center) as CadPoint3D | undefined;
+    const aligned = (Number(e.halign ?? 0) !== 0 || Number(e.valign ?? 0) !== 0) && isFinitePoint(e.endPoint);
+    const p = (aligned ? e.endPoint : e.insertionPoint ?? e.startPoint ?? e.center) as CadPoint3D | undefined;
     const text = stripMTextFormatting(String(e.text ?? e.value ?? ''));
     const height = Number(e.textHeight ?? e.height ?? 1);
     if (!isFinitePoint(p) || !text) return this.markSkipped(String(e.type));
@@ -613,11 +624,17 @@ export class CadCanvasRenderer {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.translate(s.x, s.y);
     ctx.rotate(-rotation);
+    const generationFlag = Number(e.generationFlag ?? 0);
+    const xScale = Number(e.xScale ?? 1);
+    ctx.scale((generationFlag & 2 ? -1 : 1) * (Number.isFinite(xScale) && Math.abs(xScale) > 1e-9 ? Math.abs(xScale) : 1), generationFlag & 4 ? -1 : 1);
     const pixelHeight = Math.max(4, Math.min(256, Math.abs(height) * this.view.scale));
     ctx.font = `${pixelHeight}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
     ctx.fillStyle = resolveCadColor(e, this.document, { foreground: this.opts.foreground, background: this.opts.background, trueColorByteOrder: this.opts.trueColorByteOrder, contrastMode: this.opts.contrastMode, minColorContrast: this.opts.minColorContrast });
     ctx.globalAlpha = clamp(Number(e.opacity ?? 1), 0, 1);
-    ctx.textBaseline = 'alphabetic';
+    const halign = Number(e.halign ?? 0);
+    const valign = Number(e.valign ?? 0);
+    ctx.textAlign = halign === 1 || halign === 4 ? 'center' : halign === 2 ? 'right' : 'left';
+    ctx.textBaseline = valign === 1 ? 'bottom' : valign === 2 ? 'middle' : valign === 3 ? 'top' : 'alphabetic';
     for (const [index, line] of text.split(/\r?\n/g).entries()) ctx.fillText(line, 0, index * pixelHeight * 1.22);
     ctx.restore();
     this.stats.drawn++;
@@ -629,6 +646,7 @@ export class CadCanvasRenderer {
     const pattern = resolveCadLinePattern(e, this.document);
     if (pattern) {
       const primitives = createDashedCadPrimitives(valid, closed, pattern);
+      const fallbackDots = [...primitives.dots];
       this.beginStyledPath(e, false, false);
       for (const [start, end] of primitives.segments) {
         const a = this.worldToScreen(start);
@@ -636,12 +654,26 @@ export class CadCanvasRenderer {
         this.ctx.moveTo(a.x, a.y);
         this.ctx.lineTo(b.x, b.y);
       }
+      for (const marker of primitives.markers ?? []) {
+        const glyph = this.resolveLineTypeGlyph(marker);
+        if (!glyph) continue;
+        removeMatchingPoint(fallbackDots, marker.fallbackPoint);
+        for (const polyline of transformCadLineTypeGlyph(marker, glyph)) {
+          if (polyline.length < 2) continue;
+          const first = this.worldToScreen(polyline[0]);
+          this.ctx.moveTo(first.x, first.y);
+          for (const point of polyline.slice(1)) {
+            const screen = this.worldToScreen(point);
+            this.ctx.lineTo(screen.x, screen.y);
+          }
+        }
+      }
       this.ctx.stroke();
-      if (primitives.dots.length > 0) {
+      if (fallbackDots.length > 0) {
         this.ctx.setLineDash([]);
         this.ctx.beginPath();
         const radius = Math.max(0.5, this.ctx.lineWidth / 2);
-        for (const point of primitives.dots) {
+        for (const point of fallbackDots) {
           const screen = this.worldToScreen(point);
           this.ctx.moveTo(screen.x + radius, screen.y);
           this.ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
@@ -662,6 +694,12 @@ export class CadCanvasRenderer {
     }
     if (closed) this.ctx.closePath();
     this.finishStroke();
+  }
+
+  private resolveLineTypeGlyph(marker: CadLineTypeMarker): CadShxGlyph | undefined {
+    return marker.kind === 'shape'
+      ? this.opts.shxGlyphResolver.resolveShape(Number(marker.shapeNumber), marker.fontName)
+      : this.opts.shxGlyphResolver.resolveText(String(marker.text ?? ''), marker.fontName);
   }
 
   private markSkipped(type: string): void {
@@ -726,4 +764,11 @@ function cloneStats(stats: RenderStats): RenderStats {
     gpuMemoryBytes: stats.gpuMemoryBytes,
     buildElapsedMs: stats.buildElapsedMs
   };
+}
+
+function removeMatchingPoint(points: CadPoint2D[], target: CadPoint2D): void {
+  const extent = Math.max(1, Math.abs(target.x), Math.abs(target.y));
+  const tolerance = Math.max(1e-9, extent * 1e-12);
+  const index = points.findIndex((point) => Math.hypot(point.x - target.x, point.y - target.y) <= tolerance);
+  if (index >= 0) points.splice(index, 1);
 }

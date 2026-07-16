@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0 - 2026-07-16
+
+### Added
+
+- Added complete external SHX reference handling for complex DWG linetypes, including missing/incompatible state reporting, browser-local parsing, required-glyph validation and cached shape/text outline rendering.
+- Added `onReferenceStateChange`, `addReference()`, `addReferenceFile()`, `addReferenceBuffer()`, `removeReference()`, `clearReferences()`, `getReferenceState()`, `getMissingReferences()` and `getLoadedReferences()`.
+- Added a contextual SHX upload control to the demo; supplied references rebuild Canvas2D or retained WebGL geometry without resetting the current view.
+
+### Changed
+
+- Preserved STYLE handles and resolved SHX font names from LibreDWG LTYPE data, including the converter field needed by the worker, library and demo builds.
+- Preserved block-contained text width/alignment/mirroring, authored polyline widths and composed linetype scales through INSERT and PLAN/UCS transforms.
+- Canvas2D and WebGL now render compatible SHX shape/text glyphs with authored scale, offset and relative or absolute rotation while retaining a safe marker fallback.
+
+### Fixed
+
+- Corrected block-contained closed polylines, text/INSERT angles, wide polylines and complex dashed lines in transformed DWG views.
+- Prevented unused SHX STYLE table records from being reported as missing drawing references.
+
 ## 0.6.6 - 2026-07-15
 
 ### Added
