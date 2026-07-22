@@ -1,11 +1,12 @@
-import { addBlock, addLayer, addLineType, createCadDocument, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity';
+import { addBlock, addLayer, addLineType, createCadDocument, normalizeCadDataValue, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity';
 import { exactArrayBuffer } from '../../core/format';
 import { multiplyMatrix, rotationMatrix } from '../../core/transform';
-import type { CadBlock, CadDocument, CadEntity, CadLayer, CadLineType, CadLoadOptions, CadLoadProgress, CadLoadResult, CadPoint3D, CadSavedView, CadSceneTransform2D } from '../../core/types';
+import type { CadBlock, CadDataLink, CadDataTable, CadDataTableColumn, CadDataValue, CadDictionary, CadDocument, CadEntity, CadLayer, CadLineType, CadLoadOptions, CadLoadProgress, CadLoadResult, CadPoint3D, CadSavedView, CadSceneTransform2D, CadXRecord } from '../../core/types';
 import { readDwgVersion } from './dwgVersion';
 
 interface LibreDwgModule {
   Dwg_File_Type?: Record<string, number>;
+  Dwg_Object_Type?: Record<string, number>;
   LibreDwg?: {
     create(wasmPath?: string): Promise<any>;
     createByWasmInstance?(wasmInstance: any): any;
@@ -42,6 +43,7 @@ export async function parseDwgBytes(bytes: Uint8Array, options: ParseDwgBytesOpt
 
   options.onProgress?.({ phase: 'normalize', format: 'dwg', message: 'Normalizing DWG database…', total: bytes.byteLength, percent: 72 });
   const rawDb = typeof lib.instance.convert === 'function' ? lib.instance.convert(dwg) : dwg;
+  enrichDwgBusinessObjects(rawDb, extractDwgBusinessObjects(lib.instance, dwg, lib.module.Dwg_Object_Type));
   try {
     if (typeof lib.instance.dwg_free === 'function') lib.instance.dwg_free(dwg);
   } catch {
@@ -85,14 +87,14 @@ export async function createLibreDwg(wasmPath = '/wasm/'): Promise<{ module: Lib
             wasmBinary,
             locateFile: (filename: string) => new URL(filename, ensureTrailingSlash(normalizedPath)).href
           });
-          return LibreDwg.createByWasmInstance(wasmInstance);
+          return installLibreDwgCompatibilityGuards(LibreDwg.createByWasmInstance(wasmInstance));
         }
 
         // Important: call the static method on the class object. The upstream
         // implementation uses `this.createByWasmInstance(...)`; extracting
         // `create` into a standalone function loses `this` and causes
         // "Cannot read properties of undefined (reading 'createByWasmInstance')".
-        return await LibreDwg.create(normalizedPath);
+        return installLibreDwgCompatibilityGuards(await LibreDwg.create(normalizedPath));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Failed to initialize LibreDWG WebAssembly from ${normalizedPath}. Ensure libredwg-web.wasm is deployed at ${getLibreDwgWasmUrl(normalizedPath)} and wasmPath is resolved relative to the page, not the worker script. Run npm run copy:wasm before dev/build. Original error: ${message}`);
@@ -105,6 +107,67 @@ export async function createLibreDwg(wasmPath = '/wasm/'): Promise<{ module: Lib
   return { module, instance, Dwg_File_Type: module.Dwg_File_Type };
 }
 
+/**
+ * Keep upstream converter defects isolated at the native-wrapper boundary.
+ *
+ * libredwg-web 0.7.9 exposes linetype dash records as Embind objects. Some
+ * valid DWGs contain a null complex-linetype text pointer; reading the generated
+ * `text` property then throws while trying to call `null.toString()`. The
+ * converter reads every dash field eagerly, so one empty optional field used to
+ * abort the whole drawing. Copying the record through guarded getters preserves
+ * all readable fields and treats the invalid optional field as absent.
+ */
+function installLibreDwgCompatibilityGuards(instance: any): any {
+  if (!instance || instance.__cadViewerCompatibilityGuards === true) return instance;
+  const original = instance.dwg_ptr_to_ltype_dash_array;
+  if (typeof original === 'function') {
+    try {
+      instance.dwg_ptr_to_ltype_dash_array = (...args: unknown[]) => {
+        const dashes = original.apply(instance, args);
+        if (!Array.isArray(dashes)) return [];
+        return dashes.map((dash) => ({
+          length: safeNativeProperty(dash, 'length'),
+          complex_shapecode: safeNativeProperty(dash, 'complex_shapecode'),
+          shape_flag: safeNativeProperty(dash, 'shape_flag'),
+          style: safeNativeReference(instance, safeNativeProperty(dash, 'style')),
+          scale: safeNativeProperty(dash, 'scale'),
+          rotation: safeNativeProperty(dash, 'rotation'),
+          x_offset: safeNativeProperty(dash, 'x_offset'),
+          y_offset: safeNativeProperty(dash, 'y_offset'),
+          text: safeNativeProperty(dash, 'text')
+        }));
+      };
+    } catch {
+      // A frozen third-party wrapper cannot be patched. The original method is
+      // left untouched and its converter error will retain the upstream stack.
+    }
+  }
+  try {
+    Object.defineProperty(instance, '__cadViewerCompatibilityGuards', { value: true });
+  } catch {
+    // Non-extensible wrappers are valid; installing the callable guard above is enough.
+  }
+  return instance;
+}
+
+function safeNativeProperty(value: unknown, key: string): unknown {
+  if (!value || typeof value !== 'object') return undefined;
+  try {
+    return (value as Record<string, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function safeNativeReference(instance: any, reference: unknown): unknown {
+  if (!reference) return undefined;
+  try {
+    return instance.dwg_ref_get_absref?.(reference) == null ? undefined : reference;
+  } catch {
+    return undefined;
+  }
+}
+
 export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, version?: unknown, options: { keepRaw?: boolean } = {}): CadDocument {
   const record = rawDb && typeof rawDb === 'object' ? rawDb as Record<string, unknown> : {};
   const layers = extractLayers(record, options);
@@ -115,6 +178,10 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
   const requiredShxFonts = extractRequiredShapeFonts(lineTypes);
   const savedViewResult = extractSavedView(record, header);
   const savedView = savedViewResult.view;
+  const dictionaries = extractDictionaries(record);
+  const xrecords = extractXRecords(record, dictionaries);
+  const dataLinks = extractDataLinks(record);
+  const dataTables = extractDataTables(record);
   const rawEntities = Array.isArray(record.entities) ? record.entities : [];
   const normalizeOptions = { keepRaw: Boolean(options.keepRaw), includeUnknownProperties: Boolean(options.keepRaw) };
   const entities = rawEntities
@@ -130,12 +197,22 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
     blocks,
     entities,
     savedView,
+    dictionaries,
+    xrecords,
+    dataLinks,
+    dataTables,
     metadata: {
       parser: '@mlightcad/libredwg-web',
       parserMode: 'wasm',
       version,
       savedView,
-      requiredShxFonts
+      requiredShxFonts,
+      businessData: {
+        dictionaries: dictionaries.length,
+        xrecords: xrecords.length,
+        dataLinks: dataLinks.length,
+        dataTables: dataTables.length
+      }
     },
     warnings: savedViewResult.warning ? [savedViewResult.warning] : [],
     raw: options.keepRaw ? rawDb : undefined
@@ -152,6 +229,377 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
     document.warnings.push(`Complex SHX linetype glyphs are preserved in the normalized LTYPE definition and rendered as a dash/dot approximation.${dependency}`);
   }
   return document;
+}
+
+interface DwgBusinessObjects {
+  DATALINK: Record<string, unknown>[];
+  DATATABLE: Record<string, unknown>[];
+  TABLECONTENT: Record<string, unknown>[];
+  TABLES: Record<string, unknown>[];
+}
+
+/**
+ * Reads BOM-adjacent objects before LibreDWG native memory is released.
+ * The upstream high-level converter currently omits these object classes.
+ */
+export function extractDwgBusinessObjects(instance: any, dwg: any, objectTypes: Record<string, number> | undefined): DwgBusinessObjects {
+  const result: DwgBusinessObjects = { DATALINK: [], DATATABLE: [], TABLECONTENT: [], TABLES: [] };
+  if (!instance || !dwg || !objectTypes) return result;
+  result.DATALINK = extractNativeObjects(instance, dwg, objectTypes.DWG_TYPE_DATALINK, (item, handle) => {
+    const year = numberOrUndefined(readDynamic(instance, item, 'year'));
+    const month = numberOrUndefined(readDynamic(instance, item, 'month'));
+    const day = numberOrUndefined(readDynamic(instance, item, 'day'));
+    const hour = numberOrUndefined(readDynamic(instance, item, 'hour'));
+    const minute = numberOrUndefined(readDynamic(instance, item, 'minute'));
+    const seconds = numberOrUndefined(readDynamic(instance, item, 'seconds'));
+    return compactRecord({
+      handle,
+      dataAdapter: readDynamic(instance, item, 'data_adapter'),
+      description: readDynamic(instance, item, 'description'),
+      tooltip: readDynamic(instance, item, 'tooltip'),
+      connectionString: readDynamic(instance, item, 'connection_string'),
+      option: readDynamic(instance, item, 'option'),
+      updateOption: readDynamic(instance, item, 'update_option'),
+      pathOption: readDynamic(instance, item, 'path_option'),
+      updateStatus: readDynamic(instance, item, 'update_status'),
+      lastUpdated: cadDateString(year, month, day, hour, minute, seconds)
+    });
+  });
+  result.DATATABLE = extractNativeObjects(instance, dwg, objectTypes.DWG_TYPE_DATATABLE, (item, handle) => compactRecord({
+    handle,
+    flags: readDynamic(instance, item, 'flags'),
+    rowCount: readDynamic(instance, item, 'num_rows'),
+    columnCount: readDynamic(instance, item, 'num_cols'),
+    tableName: readDynamic(instance, item, 'table_name'),
+    columns: cloneDynamicObject(readDynamic(instance, item, 'cols'))
+  }));
+  result.TABLECONTENT = extractNativeObjects(instance, dwg, objectTypes.DWG_TYPE_TABLECONTENT, (item, handle) => compactRecord({
+    handle,
+    linkedData: cloneDynamicObject(readDynamic(instance, item, 'ldata')),
+    linkedTableData: cloneDynamicObject(readDynamic(instance, item, 'tdata')),
+    formattedTableData: cloneDynamicObject(readDynamic(instance, item, 'fdata')),
+    tableStyle: nativeHandleValue(readDynamic(instance, item, 'tablestyle'))
+  }));
+
+  const tableType = objectTypes.DWG_TYPE_TABLE;
+  if (Number.isFinite(tableType) && typeof instance.dwg_getall_entities_in_model_space === 'function') {
+    try {
+      for (const object of instance.dwg_getall_entities_in_model_space(dwg) ?? []) {
+        if (instance.dwg_object_get_fixedtype?.(object) !== tableType) continue;
+        const entity = instance.dwg_object_to_entity?.(object);
+        const item = instance.dwg_object_to_entity_tio?.(object);
+        if (!entity || !item) continue;
+        const handle = nativeHandleValue(instance.dwg_object_entity_get_handle_object?.(entity)?.value);
+        result.TABLES.push(compactRecord({
+          handle,
+          linkedData: cloneDynamicObject(readDynamic(instance, item, 'ldata')),
+          linkedTableData: cloneDynamicObject(readDynamic(instance, item, 'tdata')),
+          formattedTableData: cloneDynamicObject(readDynamic(instance, item, 'fdata'))
+        }));
+      }
+    } catch {
+      // Modern TABLECONTENT is incomplete in some LibreDWG builds. Legacy cells remain available through the converter.
+    }
+  }
+  return result;
+}
+
+function enrichDwgBusinessObjects(rawDb: unknown, business: DwgBusinessObjects): void {
+  if (!rawDb || typeof rawDb !== 'object') return;
+  const database = rawDb as Record<string, unknown>;
+  const objects = database.objects && typeof database.objects === 'object'
+    ? database.objects as Record<string, unknown>
+    : (database.objects = {}) as Record<string, unknown>;
+  for (const key of ['DATALINK', 'DATATABLE', 'TABLECONTENT'] as const) {
+    if (business[key].length === 0) continue;
+    const existing = Array.isArray(objects[key]) ? objects[key] as unknown[] : [];
+    objects[key] = mergeHandleRecords(existing, business[key]);
+  }
+  if (business.TABLES.length > 0 && Array.isArray(database.entities)) {
+    const byHandle = new Map(business.TABLES.map((item) => [stringOrUndefined(item.handle)?.toLocaleUpperCase(), item]));
+    for (const entity of database.entities) {
+      if (!entity || typeof entity !== 'object') continue;
+      const record = entity as Record<string, unknown>;
+      const enrichment = byHandle.get(stringOrUndefined(record.handle)?.toLocaleUpperCase());
+      if (enrichment) Object.assign(record, enrichment);
+    }
+  }
+}
+
+function extractNativeObjects(
+  instance: any,
+  dwg: any,
+  type: number | undefined,
+  convert: (item: any, handle?: string) => Record<string, unknown>
+): Record<string, unknown>[] {
+  if (!Number.isFinite(type) || typeof instance.dwg_getall_object_by_type !== 'function') return [];
+  const result: Record<string, unknown>[] = [];
+  try {
+    for (const item of instance.dwg_getall_object_by_type(dwg, type) ?? []) {
+      const object = instance.dwg_obj_generic_to_object?.(item);
+      const handle = nativeHandleValue(object ? instance.dwg_object_get_handle_object?.(object)?.value : undefined);
+      result.push(convert(item, handle));
+    }
+  } catch {
+    // An unsupported/debugging LibreDWG class must not make an otherwise renderable drawing fail.
+  }
+  return result;
+}
+
+function readDynamic(instance: any, item: any, field: string): unknown {
+  try {
+    if (typeof instance.dwg_dynapi_entity_data === 'function') return instance.dwg_dynapi_entity_data(item, field);
+    return instance.dwg_dynapi_entity_value?.(item, field)?.data;
+  } catch {
+    return undefined;
+  }
+}
+
+function cloneDynamicObject(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || typeof value === 'number') return undefined;
+  return normalizeCadDataValue(value);
+}
+
+function nativeHandleValue(value: unknown): string | undefined {
+  if (typeof value === 'bigint') return value.toString(16).toLocaleUpperCase();
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value).toString(16).toLocaleUpperCase();
+  if (typeof value === 'string') return value.trim() || undefined;
+  if (Array.isArray(value)) return nativeHandleValue(value[3] ?? value[2]);
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return nativeHandleValue(record.absolute_ref ?? record.absoluteRef ?? record.value ?? record.handle);
+  }
+  return undefined;
+}
+
+function compactRecord(record: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+}
+
+function cadDateString(year?: number, month?: number, day?: number, hour = 0, minute = 0, second = 0): string | undefined {
+  if (!year || !month || !day) return undefined;
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
+function mergeHandleRecords(left: unknown[], right: Record<string, unknown>[]): unknown[] {
+  const result = [...left];
+  const indexes = new Map<string, number>();
+  result.forEach((item, index) => {
+    if (item && typeof item === 'object') {
+      const handle = nativeHandleValue((item as Record<string, unknown>).handle);
+      if (handle) indexes.set(handle.toLocaleUpperCase(), index);
+    }
+  });
+  for (const item of right) {
+    const handle = nativeHandleValue(item.handle);
+    const index = handle ? indexes.get(handle.toLocaleUpperCase()) : undefined;
+    if (index === undefined) result.push(item);
+    else result[index] = { ...(result[index] as Record<string, unknown>), ...item };
+  }
+  return result;
+}
+
+function extractDictionaries(rawDb: Record<string, unknown>): CadDictionary[] {
+  const objects = rawDb.objects && typeof rawDb.objects === 'object' ? rawDb.objects as Record<string, unknown> : undefined;
+  const candidates = [objects?.DICTIONARY, objects?.dictionary, rawDb.dictionaries];
+  const result: CadDictionary[] = [];
+  const handles = new Set<string>();
+  for (const candidate of candidates) {
+    for (const item of arrayOrObjectValues(candidate)) {
+      if (!item || typeof item !== 'object') continue;
+      const record = item as Record<string, unknown>;
+      const handle = nativeHandleValue(record.handle ?? record.id);
+      if (handle && handles.has(handle.toLocaleUpperCase())) continue;
+      const entries: Array<{ name: string; handle: string }> = [];
+      if (record.entries && typeof record.entries === 'object' && !Array.isArray(record.entries)) {
+        for (const [name, entryHandle] of Object.entries(record.entries as Record<string, unknown>)) {
+          const normalized = nativeHandleValue(entryHandle);
+          if (name && normalized) entries.push({ name, handle: normalized });
+        }
+      } else if (Array.isArray(record.texts) && Array.isArray(record.itemhandles)) {
+        for (let index = 0; index < Math.min(record.texts.length, record.itemhandles.length); index += 1) {
+          const name = stringOrUndefined(record.texts[index]);
+          const normalized = nativeHandleValue(record.itemhandles[index]);
+          if (name && normalized) entries.push({ name, handle: normalized });
+        }
+      }
+      result.push({ handle, ownerHandle: nativeHandleValue(record.ownerHandle ?? record.owner), entries });
+      if (handle) handles.add(handle.toLocaleUpperCase());
+    }
+  }
+  return result;
+}
+
+function extractXRecords(rawDb: Record<string, unknown>, dictionaries: CadDictionary[]): CadXRecord[] {
+  const objects = rawDb.objects && typeof rawDb.objects === 'object' ? rawDb.objects as Record<string, unknown> : undefined;
+  const candidates = [objects?.XRECORD, objects?.xrecords, rawDb.xrecords];
+  const result: CadXRecord[] = [];
+  const handles = new Set<string>();
+  for (const candidate of candidates) {
+    for (const item of arrayOrObjectValues(candidate)) {
+      if (!item || typeof item !== 'object') continue;
+      const record = item as Record<string, unknown>;
+      const handle = nativeHandleValue(record.handle ?? record.id);
+      if (handle && handles.has(handle.toLocaleUpperCase())) continue;
+      const data = (Array.isArray(record.data) ? record.data : Array.isArray(record.entries) ? record.entries : [])
+        .flatMap((group): Array<{ code?: number; value: CadDataValue }> => {
+          const groupRecord = group && typeof group === 'object' ? group as Record<string, unknown> : undefined;
+          const value = normalizeCadDataValue(groupRecord?.value ?? groupRecord?.data ?? group);
+          if (value === undefined) return [];
+          const code = numberOrUndefined(groupRecord?.code ?? groupRecord?.groupCode);
+          return [{ ...(code !== undefined ? { code } : {}), value }];
+        });
+      const ownerHandle = nativeHandleValue(record.ownerHandle ?? record.owner);
+      const location = resolveDictionaryLocation(handle, ownerHandle, dictionaries);
+      result.push({
+        handle,
+        ownerHandle,
+        entryName: stringOrUndefined(record.entryName) ?? location.entryName,
+        dictionaryPath: Array.isArray(record.dictionaryPath) ? record.dictionaryPath.map(String) : location.path,
+        extensionDictionary: nativeHandleValue(record.extensionDictionary),
+        cloning: numberOrUndefined(record.cloning),
+        data
+      });
+      if (handle) handles.add(handle.toLocaleUpperCase());
+    }
+  }
+  return result;
+}
+
+function resolveDictionaryLocation(handle: string | undefined, ownerHandle: string | undefined, dictionaries: CadDictionary[]): { entryName?: string; path?: string[] } {
+  if (!handle) return {};
+  const byHandle = new Map(dictionaries.filter((dictionary) => dictionary.handle).map((dictionary) => [dictionary.handle!.toLocaleUpperCase(), dictionary]));
+  const owner = ownerHandle ? byHandle.get(ownerHandle.toLocaleUpperCase()) : undefined;
+  const entryName = owner?.entries.find((entry) => entry.handle.toLocaleUpperCase() === handle.toLocaleUpperCase())?.name;
+  if (!owner) return { entryName };
+  const path: string[] = entryName ? [entryName] : [];
+  let current = owner;
+  const seen = new Set<string>();
+  while (current.handle && current.ownerHandle && !seen.has(current.handle.toLocaleUpperCase())) {
+    seen.add(current.handle.toLocaleUpperCase());
+    const parent = byHandle.get(current.ownerHandle.toLocaleUpperCase());
+    if (!parent) break;
+    const name = parent.entries.find((entry) => entry.handle.toLocaleUpperCase() === current.handle!.toLocaleUpperCase())?.name;
+    if (name) path.unshift(name);
+    current = parent;
+  }
+  return { entryName, path: path.length > 0 ? path : undefined };
+}
+
+function extractDataLinks(rawDb: Record<string, unknown>): CadDataLink[] {
+  const objects = rawDb.objects && typeof rawDb.objects === 'object' ? rawDb.objects as Record<string, unknown> : undefined;
+  const result: CadDataLink[] = [];
+  const handles = new Set<string>();
+  for (const item of arrayOrObjectValues(objects?.DATALINK ?? objects?.dataLinks ?? rawDb.dataLinks)) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const handle = nativeHandleValue(record.handle ?? record.id);
+    if (handle && handles.has(handle.toLocaleUpperCase())) continue;
+    result.push({
+      handle,
+      dataAdapter: stringOrUndefined(record.dataAdapter ?? record.data_adapter),
+      description: stringOrUndefined(record.description),
+      tooltip: stringOrUndefined(record.tooltip),
+      connectionString: stringOrUndefined(record.connectionString ?? record.connection_string),
+      updateStatus: stringOrUndefined(record.updateStatus ?? record.update_status),
+      updateOption: numberOrUndefined(record.updateOption ?? record.update_option),
+      pathOption: numberOrUndefined(record.pathOption ?? record.path_option),
+      lastUpdated: stringOrUndefined(record.lastUpdated ?? record.last_updated)
+    });
+    if (handle) handles.add(handle.toLocaleUpperCase());
+  }
+  return result;
+}
+
+function extractDataTables(rawDb: Record<string, unknown>): CadDataTable[] {
+  const objects = rawDb.objects && typeof rawDb.objects === 'object' ? rawDb.objects as Record<string, unknown> : undefined;
+  const candidates = [objects?.DATATABLE, objects?.dataTables, rawDb.dataTables, objects?.TABLECONTENT];
+  const result: CadDataTable[] = [];
+  const handles = new Set<string>();
+  for (const candidate of candidates) {
+    for (const item of arrayOrObjectValues(candidate)) {
+      if (!item || typeof item !== 'object') continue;
+      const record = item as Record<string, unknown>;
+      const handle = nativeHandleValue(record.handle ?? record.id);
+      if (handle && handles.has(handle.toLocaleUpperCase())) continue;
+      const linkedData = objectRecord(record.linkedData ?? record.ldata);
+      const linkedTable = objectRecord(record.linkedTableData ?? record.tdata);
+      const columns = normalizeDataTableColumns(record.columns ?? record.cols, linkedTable);
+      const rowCount = Math.max(
+        0,
+        Math.trunc(numberOrUndefined(record.rowCount ?? record.numRows ?? record.num_rows ?? linkedTable?.numRows ?? linkedTable?.num_rows) ?? 0),
+        ...columns.map((column) => column.values.length)
+      );
+      const columnCount = Math.max(
+        columns.length,
+        Math.trunc(numberOrUndefined(record.columnCount ?? record.numColumns ?? record.numCols ?? record.num_cols ?? linkedTable?.numColumns ?? linkedTable?.numCols ?? linkedTable?.num_cols) ?? 0)
+      );
+      if (columns.length === 0 && rowCount === 0 && columnCount === 0) continue;
+      result.push({
+        handle,
+        name: stringOrUndefined(record.tableName ?? record.table_name ?? record.name ?? linkedData?.name ?? linkedData?.description),
+        rowCount,
+        columnCount,
+        columns
+      });
+      if (handle) handles.add(handle.toLocaleUpperCase());
+    }
+  }
+  return result;
+}
+
+function normalizeDataTableColumns(value: unknown, linkedTable?: Record<string, unknown>): CadDataTableColumn[] {
+  const direct = Array.isArray(value) ? value : Array.isArray(linkedTable?.columns) ? linkedTable!.columns as unknown[] : Array.isArray(linkedTable?.cols) ? linkedTable!.cols as unknown[] : [];
+  if (direct.length > 0) {
+    return direct.map((column, index) => {
+      const record = objectRecord(column);
+      const rows = Array.isArray(record?.rows) ? record.rows as unknown[] : Array.isArray(record?.values) ? record.values as unknown[] : [];
+      return {
+        name: stringOrUndefined(record?.name ?? record?.text) ?? `Column ${index + 1}`,
+        type: (stringOrUndefined(record?.type) ?? numberOrUndefined(record?.type)) as string | number | undefined,
+        values: rows.map(extractDataTableValue).filter((item): item is NonNullable<typeof item> => item !== undefined)
+      };
+    });
+  }
+  const rows = Array.isArray(linkedTable?.rows) ? linkedTable.rows as unknown[] : [];
+  const rowCells = rows.map((row) => {
+    const record = objectRecord(row);
+    return Array.isArray(record?.cells) ? record.cells as unknown[] : [];
+  });
+  const count = Math.max(0, ...rowCells.map((cells) => cells.length));
+  return Array.from({ length: count }, (_, column) => ({
+    name: `Column ${column + 1}`,
+    values: rowCells.map((cells) => extractDataTableValue(cells[column])).filter((item): item is NonNullable<typeof item> => item !== undefined)
+  }));
+}
+
+function extractDataTableValue(value: unknown): ReturnType<typeof normalizeCadDataValue> {
+  const record = objectRecord(value);
+  const contents = Array.isArray(record?.cellContents) ? record.cellContents as unknown[] : Array.isArray(record?.cell_contents) ? record.cell_contents as unknown[] : undefined;
+  const source = contents?.[0] ?? record?.value ?? value;
+  const typed = objectRecord(source);
+  for (const candidate of [typed?.valueString, typed?.value_string, typed?.dataString, typed?.data_string, typed?.dataLong, typed?.data_long, typed?.dataDouble, typed?.data_double, typed?.dataDate, typed?.data_date, typed?.dataPoint, typed?.data_point, typed?.data3dPoint, typed?.data_3dpoint, source]) {
+    const normalized = normalizeCadDataValue(candidate);
+    if (normalized !== undefined
+      && normalized !== null
+      && normalized !== ''
+      && !(typeof normalized === 'object' && !Array.isArray(normalized) && Object.keys(normalized).length === 0)) return normalized;
+  }
+  return undefined;
+}
+
+function arrayOrObjectValues(value: unknown): unknown[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'object') return [];
+  const record = value as Record<string, unknown>;
+  for (const key of ['entries', 'records', 'items', 'values']) if (Array.isArray(record[key])) return record[key] as unknown[];
+  return Object.values(record).filter((item) => item && typeof item === 'object');
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function extractRequiredShapeFonts(lineTypes: Record<string, CadLineType>): string[] {

@@ -1,8 +1,9 @@
 import { createDefaultLoaderRegistry } from '../loaders';
 import type { CadLoaderRegistry } from '../loaders/CadLoaderRegistry';
 import { summarizeCadDocument } from '../core/entity';
+import { extractCadBom } from '../core/bom';
 import { CadShxFontRegistry, synchronizeCadDocumentReferences, type CadShxGlyphResolver } from '../core/shx';
-import { isCadNativeRenderableLoader, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadedReference, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadMissingReference, type CadNativeRenderableLoader, type CadReferenceInput, type CadReferenceState } from '../core/types';
+import { isCadNativeRenderableLoader, type CadBom, type CadBomOptions, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadedReference, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadMissingReference, type CadNativeRenderableLoader, type CadReferenceInput, type CadReferenceState } from '../core/types';
 import { CadCanvasRenderer, type CanvasViewerOptions, type RenderStats, type ViewChangeEvent } from './CadCanvasRenderer';
 import { CadWebGLRenderer, isWebGLAvailable } from './CadWebGLRenderer';
 
@@ -235,6 +236,11 @@ export class CadViewer {
   getLoadResult(): CadViewerLoadResult | undefined { return this.lastResult; }
   getDocument(): CadDocument | undefined { return this.activeNativeLoader ? this.lastResult?.document : this.renderer.getDocument(); }
   getSourceDocument(): CadDocument | undefined { return this.activeNativeLoader ? this.lastResult?.document : this.renderer.getSourceDocument(); }
+  /** Returns a fresh BOM derived from the parser-owned WCS document, or undefined before a file is loaded. */
+  getBom(options: CadBomOptions = {}): CadBom | undefined {
+    const document = this.getSourceDocument();
+    return document ? extractCadBom(document, options) : undefined;
+  }
   getZoomPercent(): number { return this.activeNativeLoader ? 100 : this.renderer.getZoomPercent(); }
   isNativeRendererActive(): boolean { return Boolean(this.activeNativeLoader); }
 

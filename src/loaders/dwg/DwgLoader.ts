@@ -62,5 +62,11 @@ export { DwgWorkerClient, supportsDwgWorker } from './DwgWorkerClient';
 
 function normalizeWorkerError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
-  return new Error(`${message} If the worker asset cannot be resolved by your bundler/CDN, pass workerUrl or workerFactory to CadViewer.`);
+  const needsAssetHint = /worker|fetch|wasm|magic word|mime|network|404|failed to initialize/i.test(message);
+  const normalized = new Error(`${message}${needsAssetHint ? ' If the worker asset cannot be resolved by your bundler/CDN, pass workerUrl or workerFactory to CadViewer.' : ''}`);
+  if (error instanceof Error) {
+    normalized.name = error.name;
+    normalized.stack = error.stack;
+  }
+  return normalized;
 }

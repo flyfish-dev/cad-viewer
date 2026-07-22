@@ -12,7 +12,7 @@ SHX shapes in complex linetypes do not embed their outlines in the DWG. Referenc
 
 ## DXF
 
-DXF is handled by `DxfLoader` with `dxf-parser` first and a built-in fallback parser for common DXF `ENTITIES`. Text decoding is codepage-aware: `DxfLoader` honors an explicit `dxfEncoding`, BOMs and `$DWGCODEPAGE` values before falling back to legacy candidates.
+DXF is handled by `DxfLoader` with `dxf-parser` first and a built-in fallback parser for common DXF `ENTITIES`. A bounded metadata pass restores records that `dxf-parser` skips and associates handleless R12 `ATTRIB`/XDATA by section, block and entity order. Text decoding is codepage-aware: `DxfLoader` honors an explicit `dxfEncoding`, BOMs and `$DWGCODEPAGE` values before falling back to legacy candidates.
 
 Supported preview entities include:
 
@@ -23,6 +23,17 @@ Supported preview entities include:
 - INSERT block references.
 - SOLID, TRACE, 3DFACE.
 - HATCH boundary loop preview.
+
+## BOM and property data
+
+For normalized DWG/DXF source documents, `CadViewer.getBom()` can derive typed tables from:
+
+- block `ATTDEF` defaults and per-instance `ATTRIB` values, including recursive `INSERT` and `MINSERT` quantity;
+- native TABLE/ACAD_TABLE cells and DataTable values when the parser exposes data cached inside the drawing;
+- XDATA application groups and dictionary-resolved XRECORD values (both are opt-in because the containers are application-defined);
+- aligned TEXT/MTEXT grids, accepted automatically only when row and column structure is high-confidence.
+
+Each source remains a separate `CadBomTable`; unrelated schemas are not merged. Extraction has configurable entity, depth, row and cell limits. DataLink metadata may be returned with a cached table, but the loader never opens an external file or performs a network request. Some modern TABLECONTENT variants expose dimensions or a DataLink without cached cells; these produce `empty-native-table` or `external-data-unavailable` warnings.
 
 ## DWF / DWFx / XPS
 
@@ -36,3 +47,5 @@ Covered render paths include:
 - DWFx / OPC / XPS `FixedPage` pages with WebGL-accelerated vector geometry, embedded XPS fonts where browser `FontFace` loading is available, text and image resources.
 
 `CadViewer` detects the native DWF loader and mounts it into a `nativeHost`; DWG/DXF continue to use the normalized `CadDocument` + retained WebGL renderer. Serve `dwg-worker.js`, `libredwg-web.js`, `libredwg-web.wasm` and `dwfv-render.wasm` under `/wasm`, or pass `workerUrl` / `dwfWasmUrl` explicitly. DWF/XPS overview rendering can be tuned with the `dwfLineWeightMode`, `dwfMinStrokeCssPx`, `dwfMaxOverviewStrokeCssPx`, `dwfMinTextCssPx` and `dwfMinFilledAreaCssPx` load options.
+
+The native DWF/DWFx/XPS path does not currently expose a normalized component/property model. `getBom()` therefore returns no DWF BOM tables and reports the unsupported-format boundary instead of inferring data from rendered labels.

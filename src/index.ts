@@ -8,7 +8,8 @@ export type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } fro
 
 export { CadLoaderRegistry, createDefaultLoaderRegistry, DwgLoader, DwgWorkerClient, DxfLoader, DwfLoader, supportsDwgWorker } from './loaders';
 
-export { cadEntityWorldStrokeWidth, createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadEntity, summarizeCadDocument } from './core/entity';
+export { cadEntityWorldStrokeWidth, createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadDataValue, normalizeCadEntity, normalizeCadTableData, summarizeCadDocument } from './core/entity';
+export { extractCadBom, serializeCadBomCsv, serializeCadBomJson } from './core/bom';
 export { computeCadDocumentBounds, resolveCadFitBounds, resolveCadSavedViewBounds } from './core/bounds';
 export type { CadBoundsOptions } from './core/bounds';
 export { createCadSceneDocument } from './core/scene';
@@ -23,7 +24,25 @@ export { colorFromAci, colorFromTrueColor, resolveCadColor } from './core/color'
 
 export type {
   CadBlock,
+  CadBom,
+  CadBomColumn,
+  CadBomCsvOptions,
+  CadBomJsonOptions,
+  CadBomOptions,
+  CadBomRow,
+  CadBomSourceKind,
+  CadBomSummary,
+  CadBomTable,
+  CadBomWarning,
+  CadBomWarningCode,
   CadBounds,
+  CadDataLink,
+  CadDataScalar,
+  CadDataTable,
+  CadDataTableColumn,
+  CadDataValue,
+  CadDictionary,
+  CadDictionaryEntry,
   CadDocument,
   CadEntity,
   CadEntityKind,
@@ -50,5 +69,11 @@ export type {
   CadReferenceState,
   CadSavedView,
   CadSceneTransform2D,
+  CadTableCell,
+  CadTableData,
+  CadXData,
+  CadXDataEntry,
+  CadXRecord,
+  CadXRecordGroup,
   CadSummary
 } from './core/types';

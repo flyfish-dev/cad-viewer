@@ -32,6 +32,7 @@ DWF/DWFx/XPS：W2D/XPS WebGL 矢量 + W3D/HSF 3D + Canvas 文字/图片 overlay 
 src/core/types.ts       公共数据模型
 src/core/color.ts       ACI / true color / BYLAYER 解析
 src/core/geometry.ts    CAD 几何工具
+src/core/bom.ts         有边界的 BOM/属性提取与 CSV/JSON 序列化
 src/core/linetype.ts    LTYPE 解析、继承与 dash/dot 展开
 src/core/shx.ts         外部 SHX 解析、校验、缓存与引用状态
 src/core/scene.ts       saved-view 场景归一化
@@ -93,6 +94,22 @@ Worker 线程
 Worker 默认不会把 parser raw 对象传回主线程，避免 structured clone 失败，也避免大型图纸内存翻倍。只有调试时才建议使用 `keepRaw: true`。
 
 Loader 支持 `AbortSignal`、`workerTimeoutMs`、`workerUrl` 和 `workerFactory`，应用可以取消大文件加载，并适配自定义 bundler/CDN 资源布局。请把 `dwg-worker.js` 与 `/wasm` 运行时资源一起公开托管，或者显式传入 `workerUrl`。
+
+## BOM 提取模型
+
+BOM 提取运行在 parser 保留的源文档上，不依赖变换后的渲染几何。`extractCadBom()` 会把不同来源的明细表保持为独立类型表格，并限制行数、单元格数、遍历实体数和递归深度。应用自定义的 XDATA 与 XRECORD 可通过 `sources` 显式读取，但默认不进入 BOM，避免把 CAD 内部缓存误当成零件表。
+
+```text
+DWG / DXF 源 CadDocument
+  ├─ INSERT / MINSERT → ATTDEF 默认值 + ATTRIB 实例值
+  ├─ ACAD_TABLE / TABLE → 图纸中已有的缓存单元格
+  ├─ DataTable / XDATA / XRECORD → 类型化属性表
+  └─ 对齐 TEXT / MTEXT → 高置信度文字网格兜底
+      ↓
+CadBom → serializeCadBomCsv() / serializeCadBomJson()
+```
+
+DataLink 只作为元数据处理。组件不会跟随连接字符串，也不会读取外部工作簿；只能返回图纸内部已经保存的数据。现代表格 payload 缺失时会给出 warning。原生 DWF 渲染器目前没有归一化的组件/属性模型，因此不会生成 BOM 表格。
 
 ## 外部 SHX 引用模型
 
@@ -163,6 +180,7 @@ interface CadNativeRenderableLoader extends CadLoader {
 - `entities`：顶层实体。
 - `pages`：可选页面实体和 native renderer 元数据。
 - `savedView`：active VPORT 或 header UCS 的视图元数据及安全 2D 场景变换。
+- `dataLinks`、`dataTables`、`xrecords`、`dictionaries`：源 parser 可选暴露的业务数据记录。
 - `warnings`：非致命解析/渲染限制。
 - `raw`：原始 parser 输出，便于调试。
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.8.0 - 2026-07-22
+
+### Added
+
+- Added typed BOM extraction for block attributes, `MINSERT` quantities, cached native tables, DataTable, XDATA, XRECORD and high-confidence text grids.
+- Added `CadViewer.getBom()`, `extractCadBom()`, and spreadsheet-safe CSV/JSON serializers.
+- Added a compact BOM inspector and per-table CSV/full JSON downloads to the demo.
+
+### Changed
+
+- DataLink handling is metadata-only and never reads linked external files; unavailable cached cells are reported as structured warnings.
+- XDATA and XRECORD application containers remain fully queryable through `sources`, but are opt-in so internal CAD caches do not flood the default BOM.
+- Documented that native DWF/DWFx/XPS rendering does not currently expose normalized BOM metadata.
+
+### Fixed
+
+- Restored real DWG loading when LibreDWG 0.7.9 encounters a null complex-linetype STYLE reference, while preserving the upstream worker stack for diagnostics.
+- Associated handleless R12 DXF `ATTRIB` and XDATA records by section/block context and entity order.
+- Bounded secondary DXF metadata scans, sparse table coordinates, XRECORD/DataTable values, recursive quantities and text-grid reconstruction.
+- Redacted DataLink connection strings from JSON by default and prevented spreadsheet formulas from executing in CSV exports.
+
 ## 0.7.0 - 2026-07-16
 
 ### Added

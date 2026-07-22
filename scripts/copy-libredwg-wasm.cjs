@@ -17,7 +17,9 @@ for (const sourceDir of libredwgCandidates) {
   if (!fs.existsSync(sourceDir)) continue;
   for (const entry of fs.readdirSync(sourceDir)) {
     if (!/^(libredwg-web\.(wasm|js)|.*\.data|.*worker\.js)$/i.test(entry)) continue;
-    fs.copyFileSync(path.join(sourceDir, entry), path.join(targetDir, entry));
+    const target = path.join(targetDir, entry);
+    fs.copyFileSync(path.join(sourceDir, entry), target);
+    fs.chmodSync(target, 0o644);
     libredwgCopied++;
   }
   if (libredwgCopied > 0) break;
@@ -27,6 +29,7 @@ const dwfvSource = path.join(projectRoot, 'node_modules', 'dwf-viewer', 'public'
 const dwfvTarget = path.join(targetDir, 'dwfv-render.wasm');
 if (fs.existsSync(dwfvSource)) {
   fs.copyFileSync(dwfvSource, dwfvTarget);
+  fs.chmodSync(dwfvTarget, 0o644);
 } else {
   console.error('[cad-viewer] dwf-viewer/public/dwfv-render.wasm was not found. Run npm install and verify dwf-viewer is installed.');
   process.exit(1);

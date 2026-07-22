@@ -32,6 +32,7 @@ External SHX File / bytes → CadShxFontRegistry → validated glyph cache → C
 src/core/types.ts       public data model
 src/core/color.ts       ACI / true color / BYLAYER resolution
 src/core/geometry.ts    CAD geometry helpers
+src/core/bom.ts         bounded BOM/property extraction and CSV/JSON serialization
 src/core/linetype.ts    LTYPE resolution, inheritance and dash/dot expansion
 src/core/shx.ts         external SHX parsing, validation, cache and reference state
 src/core/scene.ts       saved-view scene normalization
@@ -93,6 +94,22 @@ main thread
 The worker payload intentionally excludes raw parser objects by default. That keeps messages structured-clone-safe and avoids doubling memory use for large drawings. Use `keepRaw: true` only for debugging.
 
 The loader accepts `AbortSignal`, `workerTimeoutMs`, `workerUrl` and `workerFactory`, so applications can cancel large files and integrate with custom bundler/CDN asset layouts. Serve `dwg-worker.js` beside the `/wasm` runtime assets or pass `workerUrl` explicitly.
+
+## BOM extraction model
+
+BOM extraction runs on the parser-owned source document, not on transformed render geometry. `extractCadBom()` keeps different schedules as separate typed tables and applies row, cell, entity and recursion limits. Application-defined XDATA and XRECORD containers are available through explicit `sources` selection and stay out of the default BOM to avoid exposing internal CAD caches as parts tables.
+
+```text
+DWG / DXF source CadDocument
+  ├─ INSERT / MINSERT → ATTDEF defaults + ATTRIB instance values
+  ├─ ACAD_TABLE / TABLE → cells cached in the drawing
+  ├─ DataTable / XDATA / XRECORD → typed property tables
+  └─ aligned TEXT / MTEXT → high-confidence text-grid fallback
+      ↓
+CadBom → serializeCadBomCsv() / serializeCadBomJson()
+```
+
+DataLink records are metadata only. The library never follows a connection string or reads an external workbook; only values already present in the drawing can be returned. Missing modern table payloads are reported as warnings. The native DWF renderer currently has no normalized component/property model, so it does not produce BOM tables.
 
 ## External SHX reference model
 
@@ -163,6 +180,7 @@ A `CadDocument` contains:
 - `entities`: top-level entities.
 - `pages`: optional page entities and native-renderer metadata.
 - `savedView`: active VPORT or header-UCS view metadata and its safe 2D scene transform.
+- `dataLinks`, `dataTables`, `xrecords`, `dictionaries`: optional business-data records exposed by the source parser.
 - `warnings`: non-fatal parsing or rendering limitations.
 - `raw`: optional source parser output for debugging.
 

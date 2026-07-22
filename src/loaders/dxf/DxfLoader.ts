@@ -2,6 +2,7 @@ import { addBlock, addLayer, createCadDocument, normalizeCadEntity, numberOrUnde
 import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
 import { degreesToRadians } from '../../core/geometry';
 import type { CadBlock, CadDocument, CadEntity, CadLayer, CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader, CadPoint3D } from '../../core/types';
+import { applyDxfBomSupplement, parseDxfBomSupplement } from './DxfBomSupplement';
 
 export class DxfLoader implements CadLoader {
   readonly id = 'dxf';
@@ -31,6 +32,7 @@ export class DxfLoader implements CadLoader {
       parsed = parseDxfFallback(text);
     }
     const document = normalizeDxfDatabase(parsed, input.fileName ?? input.file?.name, warnings);
+    applyDxfBomSupplement(document, parseDxfBomSupplement(text));
     const elapsedMs = performance.now() - started;
     return { document, raw: parsed, bytes: bytes.byteLength, elapsedMs, format: 'dxf', warnings: document.warnings };
   }

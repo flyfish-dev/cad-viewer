@@ -12,6 +12,14 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.8.0 变更
+
+- 新增类型完整的 BOM 提取，覆盖块属性、`MINSERT` 数量、原生表格、DataTable、XDATA、XRECORD 和高置信度文字表格。
+- 新增 `CadViewer.getBom()`、`extractCadBom()`，以及防电子表格公式注入的 CSV/JSON 导出工具。
+- Demo 新增紧凑的 BOM 检查器；提取逻辑仍与渲染器和浏览器 UI 解耦。
+- 加固 DWG/DXF 元数据归一化，对异常表格数据设置资源上限，并确保 DataLink 外部文件保持离线且不会被读取。
+- LibreDWG WebAssembly 升级到 0.7.9，并兼容空复杂线型 STYLE 引用，避免有效图纸加载失败。
+
 ## 0.7.0 变更
 
 - 修正 PLAN/UCS 变换后的块内 DWG 几何，包括 INSERT/文字角度归一化、闭合多段线 fallback 检测，以及常量/顶点线宽保留。
@@ -108,6 +116,7 @@
 - **DWG 预览**：通过 LibreDWG WebAssembly 在浏览器本地解析，默认在 Web Worker 中执行。
 - **DWG 视图与线型保真**：active 平面 saved view、块内文字对齐和宽度、闭合/宽多段线、LTYPE 表、BYLAYER/BYBLOCK 继承、dash/dot pattern 和稳定线型缩放。
 - **外部 SHX 引用**：识别复杂线型缺失的 shape 字体，接收本地文件或 API 字节，校验必需 glyph，并在 Canvas2D/WebGL 中渲染真实 SHX shape/text 几何。
+- **BOM 读取**：将块属性、CAD 缓存表格、DataTable、XDATA、XRECORD 和高置信度文字网格整理为统一类型 API，并支持安全导出 CSV/JSON。
 - **DXF 预览**：JavaScript 解析，支持常见 ASCII DXF `ENTITIES`，并带 fallback parser。
 - **DWF/DWFx/XPS 预览**：由 `dwf-viewer` 支持 DWF ZIP 包、WebGL 加速 W2D 与 XPS/DWFx 2D 矢量、W3D/HSF eModel、XPS 嵌入字体、自适应 CAD 线宽和 raster fallback。
 - **CAD 颜色处理**：支持 ACI、BYLAYER、BYBLOCK 继承、DWG 图层颜色、true color、填充色、透明度和自适应对比度。
@@ -327,9 +336,29 @@ await viewer.preloadDwg();       // 可选 DWG worker/WASM 预热
 viewer.setCanvasOptions({ background: '#f7f8fb', foreground: '#111827' });
 viewer.getDocument();            // 已应用 saved view 的渲染场景 CadDocument
 viewer.getSourceDocument();      // parser 保留的原始 WCS CadDocument
+viewer.getBom();                 // 从源文档读取归一化 CadBom
 viewer.clear();
 viewer.destroy();
 ```
+
+### BOM 与图纸属性
+
+`getBom()` 从 parser 保留的源文档生成相互独立的表格。它支持 `ATTDEF` 默认值与 `ATTRIB` 实例覆盖、递归 `INSERT`/`MINSERT` 数量、图纸中已有缓存单元格的原生表格、DataTable、XDATA、XRECORD，以及结构置信度足够高的对齐文字网格。XDATA 和 XRECORD 需要显式启用，因为真实图纸中通常含有大量与 BOM 无关的应用缓存。
+
+```ts
+import { serializeCadBomCsv, serializeCadBomJson } from '@flyfish-dev/cad-viewer';
+
+await viewer.loadFile(dwgFile);
+const bom = viewer.getBom({ aggregateBlocks: true, textTables: 'auto' });
+if (bom) {
+  const csv = serializeCadBomCsv(bom, { tableId: bom.tables[0]?.id });
+  const json = serializeCadBomJson(bom); // 默认隐藏 DataLink connectionString
+}
+
+const applicationRecords = viewer.getBom({ sources: ['xdata', 'xrecord'] });
+```
+
+组件不会打开或请求 DataLink 指向的外部文件，只返回链接元数据和图纸内部已经缓存的单元格值。JSON 导出默认省略 `connectionString`；仅在可信目标中显式使用 `{ includeSensitiveData: true }`。现代 CAD 表格若未被 parser 暴露单元格，结果会给出结构化 warning，不会猜测数据。原生 DWF/DWFx/XPS 渲染链路目前没有归一化 BOM 元数据。
 
 ### 外部 SHX 引用
 

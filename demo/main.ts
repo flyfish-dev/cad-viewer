@@ -1,6 +1,20 @@
 import '../src/styles.css';
 import './styles.css';
-import { CadViewer, isWebGLAvailable, supportsDwgWorker, type CadLoadProgress, type CadReferenceState, type CadViewerLoadResult, type CadViewerRendererBackend, type RenderStats, type ViewChangeEvent } from '../src';
+import {
+  CadViewer,
+  isWebGLAvailable,
+  serializeCadBomCsv,
+  serializeCadBomJson,
+  supportsDwgWorker,
+  type CadBom,
+  type CadBomSourceKind,
+  type CadLoadProgress,
+  type CadReferenceState,
+  type CadViewerLoadResult,
+  type CadViewerRendererBackend,
+  type RenderStats,
+  type ViewChangeEvent
+} from '../src';
 
 const host = document.querySelector<HTMLDivElement>('#app');
 if (!host) throw new Error('#app not found');
@@ -81,6 +95,18 @@ host.innerHTML = `
           <div><dt>Layers</dt><dd id="layers">0</dd></div>
           <div><dt>Blocks</dt><dd id="blocks">0</dd></div>
         </div>
+        <div class="inspector-section bom-section">
+          <div class="inspector-heading">
+            <h2>Bill of materials</h2>
+            <div class="bom-actions">
+              <select id="bom-table-select" class="bom-select is-hidden" aria-label="Table to export as CSV"></select>
+              <button id="bom-csv-button" class="mini-btn" type="button" disabled>CSV</button>
+              <button id="bom-json-button" class="mini-btn" type="button" disabled>JSON</button>
+            </div>
+          </div>
+          <div id="bom-summary" class="bom-summary muted">No BOM data.</div>
+          <div id="bom-list" class="bom-list"></div>
+        </div>
         <div class="inspector-section">
           <h2>Entity types</h2>
           <div id="type-list" class="type-list muted">No entities.</div>
@@ -134,6 +160,11 @@ const visiblePrimitivesEl = getElement<HTMLElement>('visible-primitives');
 const gpuMemoryEl = getElement<HTMLElement>('gpu-memory');
 const layersEl = getElement<HTMLElement>('layers');
 const blocksEl = getElement<HTMLElement>('blocks');
+const bomSummaryEl = getElement<HTMLElement>('bom-summary');
+const bomListEl = getElement<HTMLElement>('bom-list');
+const bomTableSelect = getElement<HTMLSelectElement>('bom-table-select');
+const bomCsvButton = getElement<HTMLButtonElement>('bom-csv-button');
+const bomJsonButton = getElement<HTMLButtonElement>('bom-json-button');
 const typeListEl = getElement<HTMLElement>('type-list');
 const warningsEl = getElement<HTMLElement>('warnings');
 const statusEl = getElement<HTMLElement>('status');
@@ -154,6 +185,7 @@ let uiTheme: UiTheme = readStoredTheme('cad-viewer-ui-theme', prefersLight() ? '
 let drawingTheme: DrawingTheme = readStoredTheme('cad-viewer-drawing-theme', 'dark');
 let adaptiveContrast = localStorage.getItem('cad-viewer-adaptive-contrast') !== 'false';
 let activeAbort: AbortController | undefined;
+let currentBom: CadBom | undefined;
 
 const viewer = new CadViewer({
   canvas,
@@ -184,6 +216,7 @@ const viewer = new CadViewer({
   onLoadProgress: updateLoadProgress,
   onLoad: updateLoadInfo,
   onError: (error) => {
+    console.error('[cad-viewer] Failed to load CAD file.', error);
     setStatus(error.message, true);
     setLoading(false);
     if (!viewer.getDocument()) emptyHint.classList.remove('is-hidden');
@@ -230,6 +263,8 @@ clearButton.addEventListener('click', () => {
   skippedEl.textContent = '0';
   layersEl.textContent = '0';
   blocksEl.textContent = '0';
+  currentBom = undefined;
+  renderBom();
   parseTimeEl.textContent = '—';
   renderTimeEl.textContent = '—';
   loadModeEl.textContent = supportsDwgWorker() ? 'Worker' : 'Main';
@@ -242,6 +277,26 @@ clearButton.addEventListener('click', () => {
   warningsEl.classList.add('muted');
   emptyHint.classList.remove('is-hidden');
   setStatus('Ready');
+});
+
+bomCsvButton.addEventListener('click', () => {
+  if (!currentBom?.tables.length) return;
+  const tableId = bomTableSelect.value || undefined;
+  const table = currentBom.tables.find((candidate) => candidate.id === tableId);
+  downloadText(
+    `${downloadBaseName(currentBom.sourceName)}-${downloadBaseName(table?.name ?? 'bom')}.csv`,
+    serializeCadBomCsv(currentBom, { tableId, escapeFormulas: true, includeUtf8Bom: true }),
+    'text/csv;charset=utf-8'
+  );
+});
+
+bomJsonButton.addEventListener('click', () => {
+  if (!currentBom) return;
+  downloadText(
+    `${downloadBaseName(currentBom.sourceName)}-bom.json`,
+    serializeCadBomJson(currentBom),
+    'application/json;charset=utf-8'
+  );
 });
 
 cancelButton.addEventListener('click', () => {
@@ -317,6 +372,8 @@ function updateLoadInfo(result: CadViewerLoadResult): void {
   entitiesEl.textContent = result.summary.entityCount.toLocaleString();
   layersEl.textContent = result.summary.layerCount.toLocaleString();
   blocksEl.textContent = result.summary.blockCount.toLocaleString();
+  currentBom = viewer.getBom();
+  renderBom();
 
   const entries = Object.entries(result.summary.byType).sort((a, b) => b[1] - a[1]);
   typeListEl.classList.toggle('muted', entries.length === 0);
@@ -328,6 +385,114 @@ function updateLoadInfo(result: CadViewerLoadResult): void {
   emptyHint.classList.add('is-hidden');
   setLoading(false);
   setStatus(`Loaded ${result.format.toUpperCase()} · ${result.summary.entityCount.toLocaleString()} entities`);
+}
+
+function renderBom(): void {
+  const tables = currentBom?.tables ?? [];
+  const displayTables = [...tables].sort((left, right) => right.rows.length - left.rows.length);
+  bomCsvButton.disabled = tables.length === 0;
+  bomJsonButton.disabled = !currentBom;
+  bomTableSelect.classList.toggle('is-hidden', tables.length < 2);
+  bomTableSelect.replaceChildren(...displayTables.map((table) => {
+    const option = document.createElement('option');
+    option.value = table.id;
+    option.textContent = `${table.name} (${table.rows.length.toLocaleString()})`;
+    return option;
+  }));
+
+  if (!currentBom) {
+    bomSummaryEl.textContent = 'No BOM data.';
+    bomSummaryEl.className = 'bom-summary muted';
+    bomListEl.replaceChildren();
+    return;
+  }
+
+  const { summary } = currentBom;
+  bomSummaryEl.className = 'bom-summary';
+  bomSummaryEl.innerHTML = [
+    summary.tableCount ? `<span><b>${summary.tableCount.toLocaleString()}</b> tables</span>` : '',
+    summary.rowCount ? `<span><b>${summary.rowCount.toLocaleString()}</b> rows</span>` : '',
+    summary.blockQuantity ? `<span><b>${summary.blockQuantity.toLocaleString()}</b> quantity</span>` : ''
+  ].filter(Boolean).join('') || '<span>No structured BOM rows.</span>';
+
+  const fragment = document.createDocumentFragment();
+  for (const [index, table] of displayTables.slice(0, 12).entries()) {
+    const details = document.createElement('details');
+    details.className = 'bom-table';
+    details.open = index === 0;
+    details.addEventListener('toggle', () => {
+      if (details.open) bomTableSelect.value = table.id;
+    });
+    details.innerHTML = `
+      <summary>
+        <span class="bom-table-title"><b>${escapeHtml(table.name)}</b><small>${escapeHtml(sourceLabel(table.source))}</small></span>
+        <span class="bom-table-count">${table.rows.length.toLocaleString()} rows</span>
+      </summary>
+      ${renderBomTablePreview(table)}
+    `;
+    fragment.append(details);
+  }
+  if (tables.length > 12) {
+    const more = document.createElement('p');
+    more.className = 'bom-more muted';
+    more.textContent = `${(tables.length - 12).toLocaleString()} more tables are available in the JSON export.`;
+    fragment.append(more);
+  }
+  if (currentBom.warnings.length > 0) {
+    const warning = document.createElement('p');
+    warning.className = 'bom-note';
+    warning.textContent = currentBom.warnings[0]?.message ?? '';
+    fragment.append(warning);
+  }
+  bomListEl.replaceChildren(fragment);
+}
+
+function renderBomTablePreview(table: CadBom['tables'][number]): string {
+  const columns = table.columns.slice(0, 4);
+  const rows = table.rows.slice(0, 5);
+  if (columns.length === 0 || rows.length === 0) return '<p class="bom-more muted">No tabular values.</p>';
+  return `
+    <div class="bom-preview" role="region" aria-label="${escapeHtml(table.name)} preview" tabindex="0">
+      <table>
+        <thead><tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(formatBomValue(row.cells[column.key]))}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function formatBomValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 6 }) : String(value);
+}
+
+function sourceLabel(source: CadBomSourceKind): string {
+  const labels: Record<CadBomSourceKind, string> = {
+    'block-attributes': 'Block attributes',
+    'native-table': 'CAD table',
+    'data-table': 'Data table',
+    xdata: 'XDATA',
+    xrecord: 'XRECORD',
+    'text-table': 'Text grid'
+  };
+  return labels[source];
+}
+
+function downloadText(fileName: string, content: string, type: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadBaseName(value: string | undefined): string {
+  const base = (value ?? 'drawing').replace(/\.[^.]+$/, '').replace(/[^\p{L}\p{N}._-]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 96);
+  return base || 'drawing';
 }
 
 async function addReferenceFiles(files: File[]): Promise<void> {

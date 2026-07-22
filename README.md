@@ -12,6 +12,14 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 
 > DWG support uses `@mlightcad/libredwg-web` / LibreDWG WebAssembly in a worker. DXF support uses JavaScript parsing plus a built-in fallback parser. DWF, DWFx and XPS support is powered by `dwf-viewer` 0.6.x, including DWF 6+ ZIP containers, WHIP/W2D 2D sheets, W3D/HSF 3D eModel geometry, DWFx/OPC/XPS pages, adaptive CAD line weights and an optional raster WASM fallback.
 
+## What changed in 0.8.0
+
+- Added typed BOM extraction for block attributes, `MINSERT` quantities, native tables, DataTable, XDATA, XRECORD and high-confidence text grids.
+- Added `CadViewer.getBom()`, `extractCadBom()`, plus spreadsheet-safe CSV and JSON export helpers.
+- Added a compact BOM inspector to the demo while keeping extraction independent of the renderer and browser UI.
+- Hardened DWG/DXF metadata normalization, bounded hostile or malformed table data, and kept linked external DataLink files offline and untouched.
+- Updated LibreDWG WebAssembly to 0.7.9 and guarded a null complex-linetype STYLE reference that otherwise prevented valid drawings from loading.
+
 ## What changed in 0.7.0
 
 - Corrected block-contained DWG geometry after PLAN/UCS transforms, including canonical insert/text rotations, closed-polyline fallback detection and authored constant/vertex widths.
@@ -108,6 +116,7 @@ The project provides a clean loader architecture for **DWG**, **DXF**, **DWF**, 
 - **DWG preview**: browser-local parsing through LibreDWG WebAssembly, executed in a Web Worker by default.
 - **DWG view and linetype fidelity**: active planar saved views, block-contained text alignment and widths, closed/wide polylines, LTYPE tables, BYLAYER/BYBLOCK inheritance, dash/dot patterns and stable pattern scaling.
 - **External SHX references**: detects missing complex-linetype shape fonts, accepts local files or API-provided bytes, validates required glyphs and renders SHX shape/text geometry in Canvas2D and WebGL.
+- **BOM extraction**: reads block attributes, cached CAD tables, DataTable, XDATA, XRECORD and high-confidence text grids into one typed API with safe CSV/JSON export.
 - **DXF preview**: JavaScript parser path with fallback support for common ASCII DXF `ENTITIES`.
 - **DWF/DWFx/XPS preview**: powered by `dwf-viewer` for DWF ZIP packages, WebGL-accelerated W2D and XPS/DWFx 2D vectors, W3D/HSF eModel geometry, embedded XPS fonts, adaptive CAD line weights and raster fallback.
 - **CAD color handling**: ACI, BYLAYER, BYBLOCK inheritance, DWG layer colors, true color, fill color, opacity and adaptive contrast.
@@ -327,9 +336,29 @@ await viewer.preloadDwg();       // optional DWG worker/WASM warmup
 viewer.setCanvasOptions({ background: '#f7f8fb', foreground: '#111827' });
 viewer.getDocument();            // transformed render-space CadDocument
 viewer.getSourceDocument();      // parser-owned WCS CadDocument
+viewer.getBom();                 // normalized CadBom from the source document
 viewer.clear();
 viewer.destroy();
 ```
+
+### BOM and drawing properties
+
+`getBom()` derives independent tables from the parser-owned document. It covers `ATTDEF` defaults with `ATTRIB` overrides, recursive `INSERT`/`MINSERT` quantities, cached native table cells, DataTable, XDATA, XRECORD, and aligned text grids when their structure is high-confidence. XDATA and XRECORD are opt-in because real drawings often contain hundreds of unrelated application caches.
+
+```ts
+import { serializeCadBomCsv, serializeCadBomJson } from '@flyfish-dev/cad-viewer';
+
+await viewer.loadFile(dwgFile);
+const bom = viewer.getBom({ aggregateBlocks: true, textTables: 'auto' });
+if (bom) {
+  const csv = serializeCadBomCsv(bom, { tableId: bom.tables[0]?.id });
+  const json = serializeCadBomJson(bom); // DataLink connection strings are redacted by default
+}
+
+const applicationRecords = viewer.getBom({ sources: ['xdata', 'xrecord'] });
+```
+
+DataLink targets are never opened or fetched. The API only returns link metadata and cell values already cached in the drawing. JSON export omits `connectionString` by default; use `{ includeSensitiveData: true }` only for a trusted destination. If a modern CAD table has no cells exposed by the parser, the result contains a structured warning instead of invented values. Native DWF/DWFx/XPS rendering does not currently expose normalized BOM metadata.
 
 ### External SHX references
 

@@ -26,7 +26,9 @@ fs.mkdirSync(distWasm, { recursive: true });
 for (const entry of fs.readdirSync(publicWasm)) {
   if (/^dwg-worker.*\.js(\.map)?$/i.test(entry)) continue;
   if (!/\.(wasm|js|data|worker\.js)$/i.test(entry)) continue;
-  fs.copyFileSync(path.join(publicWasm, entry), path.join(distWasm, entry));
+  const target = path.join(distWasm, entry);
+  fs.copyFileSync(path.join(publicWasm, entry), target);
+  fs.chmodSync(target, 0o644);
 }
 
 // Compatibility entry for consumers or static examples that request /dist/index.js.
