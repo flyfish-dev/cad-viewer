@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  applyByBlockColorInheritance,
   colorFromAci,
   createCadRenderDocument,
   readCadColorPolicy,
@@ -71,6 +72,21 @@ test('monochrome mode preserves source and target alpha', () => {
     resolveFillColor({ type: 'HATCH', fillColor: 'rgba(0, 255, 0, 0.25)' }, rendered),
     'rgba(16, 32, 48, 0.125)'
   );
+});
+
+test('ByBlock inheritance applies the plot alpha exactly once', () => {
+  const rendered = createCadRenderDocument(createDocument(), {
+    mode: 'monochrome',
+    monochromeColor: 'rgba(16, 32, 48, 0.5)'
+  });
+  const inherited = applyByBlockColorInheritance(
+    { type: 'LINE', colorIndex: 0 },
+    { type: 'INSERT', color: 'rgba(255, 0, 0, 0.5)' },
+    rendered
+  );
+
+  assert.equal(inherited.color, 'rgba(255, 0, 0, 0.5)');
+  assert.equal(resolveCadColor(inherited, rendered), 'rgba(16, 32, 48, 0.25)');
 });
 
 test('source mode preserves authored colors and the ACI table', () => {
