@@ -22,7 +22,7 @@ export type { CadShxGlyph, CadShxGlyphResolver } from './core/shx';
 export { normalizeDwgDatabase } from './loaders/dwg/DwgParser';
 export { detectCadFormat, readInputBytes } from './core/format';
 export { isCadNativeRenderableLoader } from './core/types';
-export { applyCadColorPolicy, colorFromAci, colorFromTrueColor, resolveCadColor, resolveFillColor } from './core/color';
+export { applyByBlockColorInheritance, applyCadColorPolicy, colorFromAci, colorFromTrueColor, resolveCadColor, resolveFillColor } from './core/color';
 export type { CadColorContrastMode, ColorResolveOptions } from './core/color';
 
 export type {
