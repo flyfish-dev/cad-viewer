@@ -3,6 +3,16 @@ import { createCadDocument, flattenPages } from '../../core/entity';
 import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
 import type { CadDocument, CadEntity, CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadNativeRenderableLoader, CadPage, CadPathCommand, CadPoint3D } from '../../core/types';
 
+type CadColorLoadOptions = CadLoadOptions & {
+  colorMode?: 'source' | 'monochrome';
+  monochromeColor?: string;
+  canvasOptions?: { foreground?: string };
+};
+
+type DwfMonochromeOptions = {
+  monochromeColor?: string;
+};
+
 export class DwfLoader implements CadNativeRenderableLoader {
   readonly id = 'dwf';
   readonly label = 'DWF/DWFx native viewer powered by dwf-viewer';
@@ -107,6 +117,7 @@ export class DwfLoader implements CadNativeRenderableLoader {
       setPreferWebgl?: (value: boolean) => void;
       setPreferWasm?: (value: boolean) => void;
       setLineWeightMode?: (value: NonNullable<CadLoadOptions['dwfLineWeightMode']>) => void;
+      setMonochromeColor?: (value?: string) => void;
       minStrokeCssPx?: number;
       maxOverviewStrokeCssPx?: number;
       minTextCssPx?: number;
@@ -122,6 +133,7 @@ export class DwfLoader implements CadNativeRenderableLoader {
     if (typeof options.dwfPreferWebgl === 'boolean') native.setPreferWebgl?.(options.dwfPreferWebgl);
     if (typeof options.dwfPreferWasm === 'boolean') native.setPreferWasm?.(options.dwfPreferWasm);
     if (options.dwfLineWeightMode) native.setLineWeightMode?.(options.dwfLineWeightMode);
+    native.setMonochromeColor?.(resolveDwfMonochromeColor(options));
     setOptionalNumber(native, 'minStrokeCssPx', options.dwfMinStrokeCssPx);
     setOptionalNumber(native, 'maxOverviewStrokeCssPx', options.dwfMaxOverviewStrokeCssPx);
     setOptionalNumber(native, 'minTextCssPx', options.dwfMinTextCssPx);
@@ -278,15 +290,25 @@ function resolveDwfBackground(options: CadLoadOptions): string {
   return canvasOptions?.background ?? '#05070d';
 }
 
+function resolveDwfMonochromeColor(options: CadLoadOptions): string | undefined {
+  const colorOptions = options as CadColorLoadOptions;
+  if (colorOptions.colorMode !== 'monochrome') return undefined;
+  const configured = colorOptions.monochromeColor?.trim() || colorOptions.canvasOptions?.foreground?.trim();
+  return configured || '#ffffff';
+}
+
 function buildDwfViewerOptions(options: CadLoadOptions, wasmUrl: string | undefined, background: string): DwfViewerOptions {
+  const monochromeColor = resolveDwfMonochromeColor(options);
   return {
     ...buildDwfLoadOptions(options, wasmUrl, background),
     maxDevicePixelRatio: options.dwfMaxDevicePixelRatio ?? 2,
-    maxCanvasPixels: options.dwfMaxCanvasPixels ?? 16_777_216
-  };
+    maxCanvasPixels: options.dwfMaxCanvasPixels ?? 16_777_216,
+    ...(monochromeColor ? { monochromeColor } : {})
+  } as DwfViewerOptions & DwfMonochromeOptions;
 }
 
 function buildDwfLoadOptions(options: CadLoadOptions, wasmUrl: string | undefined, background: string): DwfLoadOptions {
+  const monochromeColor = resolveDwfMonochromeColor(options);
   return {
     wasmUrl,
     preferWebgl: options.dwfPreferWebgl ?? true,
@@ -298,8 +320,9 @@ function buildDwfLoadOptions(options: CadLoadOptions, wasmUrl: string | undefine
     minStrokeCssPx: options.dwfMinStrokeCssPx,
     maxOverviewStrokeCssPx: options.dwfMaxOverviewStrokeCssPx,
     minTextCssPx: options.dwfMinTextCssPx,
-    minFilledAreaCssPx: options.dwfMinFilledAreaCssPx
-  };
+    minFilledAreaCssPx: options.dwfMinFilledAreaCssPx,
+    ...(monochromeColor ? { monochromeColor } : {})
+  } as DwfLoadOptions & DwfMonochromeOptions;
 }
 
 function setOptionalNumber<T extends object, K extends keyof T>(target: T, key: K, value: number | undefined): void {
