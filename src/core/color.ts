@@ -1,3 +1,4 @@
+import { readCadColorPolicy, type CadColorMode } from './colorPolicy';
 import type { CadDocument, CadEntity, CadLayer } from './types';
 
 const BASE_ACI: Record<number, string> = {
@@ -12,7 +13,7 @@ const BASE_ACI: Record<number, string> = {
   70: '#7fff00', 71: '#bfff7f', 72: '#52a500', 73: '#7ca552', 74: '#3f7f00', 75: '#5f7f3f', 76: '#264c00', 77: '#394c26', 78: '#132600', 79: '#1c2613',
   80: '#3fff00', 81: '#9fff7f', 82: '#29a500', 83: '#67a552', 84: '#1f7f00', 85: '#4f7f3f', 86: '#134c00', 87: '#2f4c26', 88: '#092600', 89: '#172613',
   90: '#00ff00', 91: '#7fff7f', 92: '#00a500', 93: '#52a552', 94: '#007f00', 95: '#3f7f3f', 96: '#004c00', 97: '#264c26', 98: '#002600', 99: '#132613',
-  100: '#00ff3f', 101: '#7fff9f', 102: '#00a529', 103: '#52a567', 104: '#007f1f', 105: '#3f7f4f', 106: '#004c13', 107: '#264c2f', 108: '#002609', 109: '#132617',
+  100: '#00ff3f', 101: '#7fff9f', 102: '#00a529', 103: '#52a567', 104: '#007f1f', 105: '#3f4f4f', 106: '#004c13', 107: '#264c2f', 108: '#002609', 109: '#132617',
   110: '#00ff7f', 111: '#7fffbf', 112: '#00a552', 113: '#52a57c', 114: '#007f3f', 115: '#3f7f5f', 116: '#004c26', 117: '#264c39', 118: '#002613', 119: '#13261c',
   120: '#00ffbf', 121: '#7fffdf', 122: '#00a57c', 123: '#52a591', 124: '#007f5f', 125: '#3f7f6f', 126: '#004c39', 127: '#264c42', 128: '#00261c', 129: '#132621',
   130: '#00ffff', 131: '#7fffff', 132: '#00a5a5', 133: '#52a5a5', 134: '#007f7f', 135: '#3f7f7f', 136: '#004c4c', 137: '#264c4c', 138: '#002626', 139: '#132626',
@@ -30,7 +31,6 @@ const BASE_ACI: Record<number, string> = {
   250: '#333333', 251: '#505050', 252: '#696969', 253: '#828282', 254: '#bebebe', 255: '#ffffff'
 };
 
-
 export type CadColorContrastMode = 'preserve' | 'adaptive';
 
 export interface ColorResolveOptions {
@@ -39,6 +39,10 @@ export interface ColorResolveOptions {
   trueColorByteOrder?: 'rgb' | 'bgr';
   contrastMode?: CadColorContrastMode;
   minColorContrast?: number;
+  /** Optional direct override; document render metadata is used when omitted. */
+  colorMode?: CadColorMode;
+  /** Fixed color used by monochrome mode. Defaults to the active foreground. */
+  monochromeColor?: string;
 }
 
 interface RgbaColor {
@@ -156,7 +160,7 @@ export function resolveCadColor(entity: CadEntity, document?: CadDocument, optio
     color = resolveLayerColor(layer, options);
   }
 
-  return adaptColorForCanvas(color ?? fallback, options);
+  return resolveCadRenderColor(color ?? fallback, document, options);
 }
 
 export function resolveFillColor(entity: CadEntity, document?: CadDocument, options: ColorResolveOptions = {}): string | undefined {
@@ -168,7 +172,35 @@ export function resolveFillColor(entity: CadEntity, document?: CadDocument, opti
     color = Math.abs(n) <= 257 ? colorFromAci(n, options.foreground ?? '#ffffff', options.foreground ?? '#ffffff') : colorFromTrueColor(n, options.trueColorByteOrder ?? 'rgb');
   }
   if (!color && typeof entity.fillColorIndex === 'number') color = colorFromAci(entity.fillColorIndex, options.foreground ?? '#ffffff', options.foreground ?? '#ffffff');
-  return color ? adaptColorForCanvas(color, options) : undefined;
+  return color ? resolveCadRenderColor(color, document, options) : undefined;
+}
+
+/** Applies a monochrome plot-style override without changing source entities. */
+export function applyCadColorPolicy(color: string, document?: CadDocument, options: ColorResolveOptions = {}): string {
+  const policy = readCadColorPolicy(document);
+  const mode = options.colorMode ?? policy.mode;
+  if (mode !== 'monochrome') return color;
+
+  const target = parseCssColor(options.monochromeColor ?? policy.monochromeColor ?? options.foreground ?? '#000000');
+  if (!target) return color;
+  const targetRgba = parseRgba(target);
+  if (!targetRgba) return target;
+  const sourceRgba = parseRgba(color);
+  return toCssColor({
+    r: targetRgba.r,
+    g: targetRgba.g,
+    b: targetRgba.b,
+    a: targetRgba.a * (sourceRgba?.a ?? 1)
+  });
+}
+
+function resolveCadRenderColor(color: string, document: CadDocument | undefined, options: ColorResolveOptions): string {
+  const policy = readCadColorPolicy(document);
+  const mode = options.colorMode ?? policy.mode;
+  const resolved = applyCadColorPolicy(color, document, options);
+  // A fixed plot color is deliberate; contrast adaptation must not replace it
+  // or discard authored transparency.
+  return mode === 'monochrome' ? resolved : adaptColorForCanvas(resolved, options);
 }
 
 export function adaptColorForCanvas(color: string, options: ColorResolveOptions = {}): string {
@@ -228,7 +260,6 @@ function resolveLayerColor(layer: CadLayer | undefined, options: ColorResolveOpt
   if (typeof layer.colorIndex === 'number') return colorFromAci(layer.colorIndex, foreground, foreground);
   return undefined;
 }
-
 
 export function isByBlockColor(entity: CadEntity): boolean {
   const aci = firstNumber(entity.colorIndex, entity.colorNumber, (entity as Record<string, unknown>).aci);
