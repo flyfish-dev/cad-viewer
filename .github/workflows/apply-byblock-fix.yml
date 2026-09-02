@@ -1,0 +1,37 @@
+name: Apply monochrome ByBlock fix
+
+on:
+  push:
+    branches: [feature/monochrome-color-mode]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[byblock-fix-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/monochrome-color-mode
+      - name: Apply fix
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          path = Path('src/core/color.ts')
+          text = path.read_text(encoding='utf-8')
+          old = "  const inheritedColor = resolveCadColor(parent, document, options);"
+          new = "  const inheritedColor = resolveCadColor(parent, document, { ...options, colorMode: 'source' });"
+          if new not in text:
+              if text.count(old) != 1:
+                  raise RuntimeError(f'Expected one ByBlock inheritance call, found {text.count(old)}')
+              path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/apply-byblock-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "fix: apply monochrome alpha once for ByBlock [byblock-fix-applied]"
+          git push origin HEAD:feature/monochrome-color-mode
