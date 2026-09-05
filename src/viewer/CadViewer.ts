@@ -2,6 +2,7 @@ import { createDefaultLoaderRegistry } from '../loaders';
 import type { CadLoaderRegistry } from '../loaders/CadLoaderRegistry';
 import { summarizeCadDocument } from '../core/entity';
 import { extractCadBom } from '../core/bom';
+import { createCadRenderDocument, type CadColorMode } from '../core/colorPolicy';
 import { CadShxFontRegistry, synchronizeCadDocumentReferences, type CadShxGlyphResolver } from '../core/shx';
 import { isCadNativeRenderableLoader, type CadBom, type CadBomOptions, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadedReference, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadMissingReference, type CadNativeRenderableLoader, type CadReferenceInput, type CadReferenceState } from '../core/types';
 import { CadCanvasRenderer, type CanvasViewerOptions, type RenderStats, type ViewChangeEvent } from './CadCanvasRenderer';
@@ -21,6 +22,10 @@ export interface CadViewerOptions extends CadLoadOptions {
   loaders?: CadLoader[];
   registry?: CadLoaderRegistry;
   autoFit?: boolean;
+  /** Preserve authored colors or render CAD vectors/text/materials with one fixed color. */
+  colorMode?: CadColorMode;
+  /** CSS color used by monochrome mode. Defaults to the active renderer foreground. */
+  monochromeColor?: string;
   onLoadStart?: (source: File | ArrayBuffer | Uint8Array | CadLoadInput) => void;
   onLoadProgress?: (progress: CadLoadProgress) => void;
   onLoad?: (result: CadViewerLoadResult) => void;
@@ -48,7 +53,7 @@ export class CadViewer {
   private activeNativeLoader?: CadNativeRenderableLoader;
 
   constructor(options: CadViewerOptions = {}) {
-    this.options = { autoFit: true, ...options };
+    this.options = { autoFit: true, colorMode: 'source', ...options };
     this.externalShxGlyphResolver = options.canvasOptions?.shxGlyphResolver;
     this.shxGlyphResolver = {
       resolveShape: (shapeNumber, fontName) => this.referenceRegistry.resolveShape(shapeNumber, fontName)
@@ -168,7 +173,7 @@ export class CadViewer {
       summary: summarizeCadDocument(document),
       fileName
     };
-    this.renderer.setDocument(document);
+    this.renderer.setDocument(this.createRenderDocument(document));
     if (!this.options.autoFit) this.renderer.render();
     this.lastResult = result;
     this.options.onLoad?.(result);
@@ -193,6 +198,27 @@ export class CadViewer {
   resize(): void {
     if (this.activeNativeLoader) this.activeNativeLoader.resize?.();
     else this.renderer.resize();
+  }
+
+  /**
+   * Switches the active viewer between authored colors and a fixed plot color.
+   * The parsed document is never rewritten. Existing pan/zoom state is retained.
+   */
+  setColorMode(mode: CadColorMode, monochromeColor = this.options.monochromeColor): void {
+    const nextMode: CadColorMode = mode === 'monochrome' ? 'monochrome' : 'source';
+    const nextColor = normalizeOptionalColor(monochromeColor);
+    if (nextMode === this.getColorMode() && nextColor === this.getMonochromeColor()) return;
+    this.options.colorMode = nextMode;
+    this.options.monochromeColor = nextColor;
+    this.refreshColorPolicy();
+  }
+
+  getColorMode(): CadColorMode {
+    return this.options.colorMode === 'monochrome' ? 'monochrome' : 'source';
+  }
+
+  getMonochromeColor(): string | undefined {
+    return normalizeOptionalColor(this.options.monochromeColor);
   }
 
   setCanvasOptions(options: CanvasViewerOptions): void {
@@ -235,7 +261,7 @@ export class CadViewer {
 
   getLoadResult(): CadViewerLoadResult | undefined { return this.lastResult; }
   getDocument(): CadDocument | undefined { return this.activeNativeLoader ? this.lastResult?.document : this.renderer.getDocument(); }
-  getSourceDocument(): CadDocument | undefined { return this.activeNativeLoader ? this.lastResult?.document : this.renderer.getSourceDocument(); }
+  getSourceDocument(): CadDocument | undefined { return this.lastResult?.document; }
   /** Returns a fresh BOM derived from the parser-owned WCS document, or undefined before a file is loaded. */
   getBom(options: CadBomOptions = {}): CadBom | undefined {
     const document = this.getSourceDocument();
@@ -267,7 +293,7 @@ export class CadViewer {
     this.options.onLoadProgress?.({ phase: 'render', format: result.format, message: 'Rendering normalized CAD scene…', percent: 96 });
     this.activateDocumentReferences(result.document);
     result.warnings = result.document.warnings;
-    this.renderer.setDocument(result.document);
+    this.renderer.setDocument(this.createRenderDocument(result.document));
     if (!this.options.autoFit) this.renderer.render();
     const value: CadViewerLoadResult = {
       ...result,
@@ -359,6 +385,25 @@ export class CadViewer {
     };
   }
 
+  private createRenderDocument(document: CadDocument): CadDocument {
+    return createCadRenderDocument(document, {
+      mode: this.getColorMode(),
+      monochromeColor: this.getMonochromeColor()
+    });
+  }
+
+  private refreshColorPolicy(): void {
+    if (this.activeNativeLoader) {
+      this.activeNativeLoader.setNativeOptions?.(this.mergeLoadOptions({}));
+      return;
+    }
+    const document = this.lastResult?.document;
+    if (!document) return;
+    const view = this.renderer.getViewState();
+    this.renderer.setDocument(this.createRenderDocument(document));
+    this.renderer.setViewState(view);
+  }
+
   private activateDocumentReferences(document: CadDocument): void {
     this.referenceRegistry.setDocument(document);
     synchronizeCadDocumentReferences(document, this.referenceRegistry.getState());
@@ -384,6 +429,12 @@ export class CadViewer {
 
 export function createCadViewer(options: CadViewerOptions = {}): CadViewer {
   return new CadViewer(options);
+}
+
+function normalizeOptionalColor(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  return normalized || undefined;
 }
 
 function normalizeError(error: unknown): Error {

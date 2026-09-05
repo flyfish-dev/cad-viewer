@@ -1,3 +1,4 @@
+import { readCadColorPolicy, type CadColorMode } from './colorPolicy';
 import type { CadDocument, CadEntity, CadLayer } from './types';
 
 const BASE_ACI: Record<number, string> = {
@@ -30,7 +31,6 @@ const BASE_ACI: Record<number, string> = {
   250: '#333333', 251: '#505050', 252: '#696969', 253: '#828282', 254: '#bebebe', 255: '#ffffff'
 };
 
-
 export type CadColorContrastMode = 'preserve' | 'adaptive';
 
 export interface ColorResolveOptions {
@@ -39,6 +39,10 @@ export interface ColorResolveOptions {
   trueColorByteOrder?: 'rgb' | 'bgr';
   contrastMode?: CadColorContrastMode;
   minColorContrast?: number;
+  /** Optional direct override; document render metadata is used when omitted. */
+  colorMode?: CadColorMode;
+  /** Fixed color used by monochrome mode. Defaults to the active foreground. */
+  monochromeColor?: string;
 }
 
 interface RgbaColor {
@@ -156,7 +160,7 @@ export function resolveCadColor(entity: CadEntity, document?: CadDocument, optio
     color = resolveLayerColor(layer, options);
   }
 
-  return adaptColorForCanvas(color ?? fallback, options);
+  return resolveCadRenderColor(color ?? fallback, document, options);
 }
 
 export function resolveFillColor(entity: CadEntity, document?: CadDocument, options: ColorResolveOptions = {}): string | undefined {
@@ -168,7 +172,35 @@ export function resolveFillColor(entity: CadEntity, document?: CadDocument, opti
     color = Math.abs(n) <= 257 ? colorFromAci(n, options.foreground ?? '#ffffff', options.foreground ?? '#ffffff') : colorFromTrueColor(n, options.trueColorByteOrder ?? 'rgb');
   }
   if (!color && typeof entity.fillColorIndex === 'number') color = colorFromAci(entity.fillColorIndex, options.foreground ?? '#ffffff', options.foreground ?? '#ffffff');
-  return color ? adaptColorForCanvas(color, options) : undefined;
+  return color ? resolveCadRenderColor(color, document, options) : undefined;
+}
+
+/** Applies a monochrome plot-style override without changing source entities. */
+export function applyCadColorPolicy(color: string, document?: CadDocument, options: ColorResolveOptions = {}): string {
+  const policy = readCadColorPolicy(document);
+  const mode = options.colorMode ?? policy.mode;
+  if (mode !== 'monochrome') return color;
+
+  const target = parseCssColor(options.monochromeColor ?? policy.monochromeColor ?? options.foreground ?? '#000000');
+  if (!target) return color;
+  const targetRgba = parseRgba(target);
+  if (!targetRgba) return target;
+  const sourceRgba = parseRgba(color);
+  return toCssColor({
+    r: targetRgba.r,
+    g: targetRgba.g,
+    b: targetRgba.b,
+    a: targetRgba.a * (sourceRgba?.a ?? 1)
+  });
+}
+
+function resolveCadRenderColor(color: string, document: CadDocument | undefined, options: ColorResolveOptions): string {
+  const policy = readCadColorPolicy(document);
+  const mode = options.colorMode ?? policy.mode;
+  const resolved = applyCadColorPolicy(color, document, options);
+  // A fixed plot color is deliberate; contrast adaptation must not replace it
+  // or discard authored transparency.
+  return mode === 'monochrome' ? resolved : adaptColorForCanvas(resolved, options);
 }
 
 export function adaptColorForCanvas(color: string, options: ColorResolveOptions = {}): string {
@@ -229,7 +261,6 @@ function resolveLayerColor(layer: CadLayer | undefined, options: ColorResolveOpt
   return undefined;
 }
 
-
 export function isByBlockColor(entity: CadEntity): boolean {
   const aci = firstNumber(entity.colorIndex, entity.colorNumber, (entity as Record<string, unknown>).aci);
   if (aci === 0) return true;
@@ -238,7 +269,7 @@ export function isByBlockColor(entity: CadEntity): boolean {
 
 export function applyByBlockColorInheritance(entity: CadEntity, parent: CadEntity, document?: CadDocument, options: ColorResolveOptions = {}): CadEntity {
   if (!isByBlockColor(entity)) return entity;
-  const inheritedColor = resolveCadColor(parent, document, options);
+  const inheritedColor = resolveCadColor(parent, document, { ...options, colorMode: 'source' });
   const clone: CadEntity = { ...entity, color: inheritedColor, trueColor: undefined, colorIndex: undefined, colorNumber: undefined };
   return clone;
 }

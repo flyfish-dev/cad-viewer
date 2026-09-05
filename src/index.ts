@@ -13,6 +13,8 @@ export { extractCadBom, serializeCadBomCsv, serializeCadBomJson } from './core/b
 export { computeCadDocumentBounds, resolveCadFitBounds, resolveCadSavedViewBounds } from './core/bounds';
 export type { CadBoundsOptions } from './core/bounds';
 export { createCadSceneDocument } from './core/scene';
+export { createCadRenderDocument, readCadColorPolicy } from './core/colorPolicy';
+export type { CadColorMode, CadColorPolicy } from './core/colorPolicy';
 export { applyByBlockLineTypeInheritance, createDashedCadPrimitives, createDashedCadSegments, resolveCadLinePattern, resolveCadLineTypeReference, transformCadLineTypeGlyph } from './core/linetype';
 export type { CadDashedPrimitives, CadLineTypeMarker, ResolvedCadLinePattern, ResolvedCadLinePatternRun } from './core/linetype';
 export { CadShxFontRegistry } from './core/shx';
@@ -20,7 +22,8 @@ export type { CadShxGlyph, CadShxGlyphResolver } from './core/shx';
 export { normalizeDwgDatabase } from './loaders/dwg/DwgParser';
 export { detectCadFormat, readInputBytes } from './core/format';
 export { isCadNativeRenderableLoader } from './core/types';
-export { colorFromAci, colorFromTrueColor, resolveCadColor } from './core/color';
+export { applyByBlockColorInheritance, applyCadColorPolicy, colorFromAci, colorFromTrueColor, resolveCadColor, resolveFillColor } from './core/color';
+export type { CadColorContrastMode, ColorResolveOptions } from './core/color';
 
 export type {
   CadBlock,
