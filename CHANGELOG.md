@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1
+
+- Added engine-level source/monochrome CAD render color policy.
+- Preserved source colors, alpha, line styles, fills, text and ByBlock inheritance.
+- Forwarded monochrome rendering to `dwf-viewer@0.6.6` for native DWF/DWFx/XPS.
+- Exposed runtime color-mode APIs and regression coverage.
+
 ## 0.8.0 - 2026-07-22
 
 ### Added
