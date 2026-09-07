@@ -341,6 +341,12 @@ viewer.clear();
 viewer.destroy();
 ```
 
+### Current-view snapshots
+
+The 0.8.2 candidate adds `await viewer.captureCanvas()`. It redraws the active view before copying Canvas2D or WebGL vectors and text overlays, and supports native DWF/DWFx through its loader. The returned canvas can encode PNG or JPEG with `toBlob()`; no source entities, camera state or source colors are changed. This captures the current viewport/current native page, not every sheet or vector PDF output. Unloaded viewers and unsupported native loaders reject the request instead of returning an empty image.
+
+Native background contrast requires the `dwf-viewer` 0.6.7 candidate. `canvasOptions.contrastMode: 'adaptive'` improves low-contrast vector/text colors; use `'preserve'` for exact source colors. Release the DWF dependency first and verify the resolved version before publishing this package.
+
 ### BOM and drawing properties
 
 `getBom()` derives independent tables from the parser-owned document. It covers `ATTDEF` defaults with `ATTRIB` overrides, recursive `INSERT`/`MINSERT` quantities, cached native table cells, DataTable, XDATA, XRECORD, and aligned text grids when their structure is high-confidence. XDATA and XRECORD are opt-in because real drawings often contain hundreds of unrelated application caches.
@@ -469,6 +475,9 @@ new CadViewer({ canvasOptions: { trueColorByteOrder: 'bgr' } });
 ```
 
 ## Development
+
+Use Node.js 22.12 or newer (Node.js 24 is used for the candidate checks).
+The development toolchain uses Vite 7; the published library still targets ES2018.
 
 ```bash
 npm install

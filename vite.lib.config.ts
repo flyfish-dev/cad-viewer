@@ -17,6 +17,8 @@ export default defineConfig({
   },
   worker: { format: 'es', plugins: () => [libredwgRuntimePatchPlugin()] },
   build: {
+    // Keep library entrypoints parseable by Vue 2 / Webpack 4 consumers.
+    target: 'es2018',
     lib: {
       entry: pathResolve(__dirname, 'src/index.ts'),
       name: 'LightweightCadViewer',

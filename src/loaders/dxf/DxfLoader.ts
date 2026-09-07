@@ -80,8 +80,14 @@ function normalizeDxfEntity(raw: Record<string, unknown>): CadEntity {
   entity.isClosed = Boolean(raw.shape ?? raw.closed ?? raw.isClosed) || ((Number(raw.flag ?? raw.flags ?? 0) & 1) === 1);
 
   if (type === 'LINE') {
-    entity.startPoint = pointFromUnknown(raw.startPoint ?? { x: raw.x1 ?? raw.x, y: raw.y1 ?? raw.y, z: raw.z1 ?? raw.z }) ?? entity.startPoint;
-    entity.endPoint = pointFromUnknown(raw.endPoint ?? { x: raw.x2, y: raw.y2, z: raw.z2 }) ?? entity.endPoint;
+    // dxf-parser stores LINE endpoints as two vertices, unlike LibreDWG's
+    // startPoint/endPoint records. Normalize both shapes before rendering.
+    entity.startPoint = entity.startPoint
+      ?? pointFromUnknown({ x: raw.x1 ?? raw.x, y: raw.y1 ?? raw.y, z: raw.z1 ?? raw.z })
+      ?? entity.vertices?.[0];
+    entity.endPoint = entity.endPoint
+      ?? pointFromUnknown({ x: raw.x2, y: raw.y2, z: raw.z2 })
+      ?? entity.vertices?.[1];
   }
   if (type === 'TEXT' || type === 'MTEXT' || type === 'ATTRIB' || type === 'ATTDEF') {
     entity.insertionPoint = pointFromUnknown(raw.startPoint ?? raw.position ?? raw.insertionPoint) ?? entity.insertionPoint;

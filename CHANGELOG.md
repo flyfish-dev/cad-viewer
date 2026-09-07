@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2 (candidate, not published)
+
+- Normalize DXF LINE vertices to start/end points, including lines in BLOCKs, without changing parser-owned data.
+- Add `captureCanvas()` for Canvas2D, WebGL and native DWF/DWFx, redrawing before capture and including text overlays.
+- Forward adaptive contrast options to the native DWF renderer. The 0.6.7 DWF candidate is required for native contrast; release it before this package.
+- Update the development toolchain to supported Vite 7 and current Wrangler; keep library output at ES2018 for Vue 2 / Webpack 4 consumers.
+
 ## 0.8.1
 
 - Added engine-level source/monochrome CAD render color policy.

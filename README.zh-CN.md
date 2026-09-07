@@ -12,6 +12,12 @@
 
 > DWG 使用 `@mlightcad/libredwg-web` / LibreDWG WebAssembly，并默认运行在 Worker 中。DXF 使用 JavaScript 解析器并带内置 fallback。DWF、DWFx、XPS 由 `dwf-viewer` 0.6.x 驱动，覆盖 DWF 6+ ZIP 包、WHIP/W2D 2D 图纸、W3D/HSF 3D eModel、DWFx/OPC/XPS 页面、自适应 CAD 线宽和可选 raster WASM fallback。
 
+## 0.8.2 候选版（尚未发布）
+
+修复 DXF `LINE` 端点归一化，包括 BLOCK 内的直线。新增 `await viewer.captureCanvas()`，重新绘制后捕获 Canvas2D / WebGL 线条和文字覆盖层，也支持原生 DWF / DWFx。返回画布可通过 `toBlob()` 编码为 PNG / JPEG；不改变源文档或当前视角。它只输出当前视图 / 当前图纸页，不是全部图纸的矢量 PDF 转换。尚未加载或原生 loader 不支持时明确失败，不返回空白成功。
+
+原生自适应对比度需要先发布并安装 `dwf-viewer` 0.6.7 候选版。`canvasOptions.contrastMode: 'adaptive'` 提高与背景接近的矢量和文字颜色的可见性，`'preserve'` 严格保留显示颜色。
+
 ## 0.8.0 变更
 
 - 新增类型完整的 BOM 提取，覆盖块属性、`MINSERT` 数量、原生表格、DataTable、XDATA、XRECORD 和高置信度文字表格。
@@ -469,6 +475,9 @@ new CadViewer({ canvasOptions: { trueColorByteOrder: 'bgr' } });
 ```
 
 ## 开发命令
+
+使用 Node.js 22.12 或更新版本，候选回归使用 Node.js 24。
+开发工具链使用 Vite 7，发布的 library 仍输出 ES2018，保留 Vue 2 / Webpack 4 兼容性。
 
 ```bash
 npm install

@@ -582,6 +582,7 @@ export interface CadNativeRenderableLoader extends CadLoader {
   zoomOut?(): void;
   resize?(): void;
   setNativeOptions?(options: CadLoadOptions): void;
+  captureCanvas?(): Promise<HTMLCanvasElement>;
 }
 
 export function isCadNativeRenderableLoader(loader: CadLoader): loader is CadNativeRenderableLoader {

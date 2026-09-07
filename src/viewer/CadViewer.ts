@@ -270,6 +270,16 @@ export class CadViewer {
   getZoomPercent(): number { return this.activeNativeLoader ? 100 : this.renderer.getZoomPercent(); }
   isNativeRendererActive(): boolean { return Boolean(this.activeNativeLoader); }
 
+  /** Captures the current view, including text overlays, without changing source data or pan/zoom. */
+  async captureCanvas(): Promise<HTMLCanvasElement> {
+    if (!this.lastResult) throw new Error('No CAD document is loaded.');
+    if (this.activeNativeLoader) {
+      if (!this.activeNativeLoader.captureCanvas) throw new Error('The native loader does not support capture.');
+      return this.activeNativeLoader.captureCanvas();
+    }
+    return this.renderer.captureCanvas();
+  }
+
   private async loadThroughRegistry(input: CadLoadInput, options: CadLoadOptions, fileName?: string): Promise<CadViewerLoadResult> {
     try {
       const merged = this.mergeLoadOptions(options);

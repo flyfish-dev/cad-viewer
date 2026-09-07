@@ -8,6 +8,8 @@ import { EMPTY_SHX_GLYPH_RESOLVER, type CadShxGlyph, type CadShxGlyphResolver } 
 import { matrixFromInsert, transformEntity } from '../core/transform';
 import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
 
+import { captureCanvasLayers } from './captureCanvas';
+
 export interface CanvasViewerOptions {
   background?: string;
   foreground?: string;
@@ -108,6 +110,10 @@ const DEFAULT_OPTIONS: Required<CanvasViewerOptions> = {
 };
 
 export class CadCanvasRenderer {
+  captureCanvas(): HTMLCanvasElement {
+    this.render();
+    return captureCanvasLayers([this.canvas]);
+  }
   readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly opts: Required<CanvasViewerOptions>;

@@ -1,12 +1,13 @@
 import { DwfViewer, openDwfDocument, type DwfViewerOptions, type LoadedDwfDocument, type LoadOptions as DwfLoadOptions, type PageData, type RenderStats as DwfRenderStats, type W2dPrimitive } from 'dwf-viewer';
 import { createCadDocument, flattenPages } from '../../core/entity';
+import { captureCanvasLayers } from '../../viewer/captureCanvas';
 import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
 import type { CadDocument, CadEntity, CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadNativeRenderableLoader, CadPage, CadPathCommand, CadPoint3D } from '../../core/types';
 
 type CadColorLoadOptions = CadLoadOptions & {
   colorMode?: 'source' | 'monochrome';
   monochromeColor?: string;
-  canvasOptions?: { foreground?: string };
+  canvasOptions?: { foreground?: string; contrastMode?: 'adaptive' | 'preserve'; minColorContrast?: number };
 };
 
 type DwfMonochromeOptions = {
@@ -118,6 +119,7 @@ export class DwfLoader implements CadNativeRenderableLoader {
       setPreferWasm?: (value: boolean) => void;
       setLineWeightMode?: (value: NonNullable<CadLoadOptions['dwfLineWeightMode']>) => void;
       setMonochromeColor?: (value?: string) => void;
+      setContrastOptions?: (options: { contrastMode?: 'adaptive' | 'preserve'; minColorContrast?: number }) => void;
       minStrokeCssPx?: number;
       maxOverviewStrokeCssPx?: number;
       minTextCssPx?: number;
@@ -134,6 +136,7 @@ export class DwfLoader implements CadNativeRenderableLoader {
     if (typeof options.dwfPreferWasm === 'boolean') native.setPreferWasm?.(options.dwfPreferWasm);
     if (options.dwfLineWeightMode) native.setLineWeightMode?.(options.dwfLineWeightMode);
     native.setMonochromeColor?.(resolveDwfMonochromeColor(options));
+    native.setContrastOptions?.(resolveDwfContrastOptions(options));
     setOptionalNumber(native, 'minStrokeCssPx', options.dwfMinStrokeCssPx);
     setOptionalNumber(native, 'maxOverviewStrokeCssPx', options.dwfMaxOverviewStrokeCssPx);
     setOptionalNumber(native, 'minTextCssPx', options.dwfMinTextCssPx);
@@ -143,6 +146,21 @@ export class DwfLoader implements CadNativeRenderableLoader {
 
   getLastNativeStats(): DwfRenderStats | undefined {
     return this.lastStats;
+  }
+
+  async captureCanvas(): Promise<HTMLCanvasElement> {
+    const native = this.native;
+    if (!native) throw new Error('No DWF document is loaded.');
+    // Finish an in-flight render, then paint the latest options and capture
+    // in the same microtask, without keeping WebGL buffers alive while idle.
+    await native.render();
+    await native.render();
+    if (this.native !== native) throw new Error('DWF document changed during capture.');
+    const layers = [native.webglCanvas, native.canvas].filter(canvas => {
+      const style = canvas.ownerDocument.defaultView?.getComputedStyle(canvas);
+      return style?.display !== 'none' && style?.visibility !== 'hidden';
+    });
+    return captureCanvasLayers(layers);
   }
 }
 
@@ -297,6 +315,11 @@ function resolveDwfMonochromeColor(options: CadLoadOptions): string | undefined 
   return configured || '#ffffff';
 }
 
+function resolveDwfContrastOptions(options: CadLoadOptions) {
+  const canvas = (options as CadColorLoadOptions).canvasOptions;
+  return { contrastMode: canvas?.contrastMode ?? 'adaptive', minColorContrast: canvas?.minColorContrast ?? 2.4 };
+}
+
 function buildDwfViewerOptions(options: CadLoadOptions, wasmUrl: string | undefined, background: string): DwfViewerOptions {
   const monochromeColor = resolveDwfMonochromeColor(options);
   return {
@@ -314,6 +337,7 @@ function buildDwfLoadOptions(options: CadLoadOptions, wasmUrl: string | undefine
     preferWebgl: options.dwfPreferWebgl ?? true,
     preferWasm: options.dwfPreferWasm ?? true,
     background,
+    ...resolveDwfContrastOptions(options),
     maxGpuCacheBytes: options.dwfMaxGpuCacheBytes ?? 160 * 1024 * 1024,
     maxCachedScenes: options.dwfMaxCachedScenes ?? 2,
     lineWeightMode: options.dwfLineWeightMode ?? 'adaptive',

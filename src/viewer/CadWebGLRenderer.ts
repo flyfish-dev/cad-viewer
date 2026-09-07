@@ -8,6 +8,7 @@ import { EMPTY_SHX_GLYPH_RESOLVER, type CadShxGlyph } from '../core/shx';
 import { matrixFromInsert, transformEntity } from '../core/transform';
 import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
 import type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './CadCanvasRenderer';
+import { captureCanvasLayers } from './captureCanvas';
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
 type GlMode = WebGLRenderingContext['LINES'] | WebGLRenderingContext['TRIANGLES'] | WebGLRenderingContext['POINTS'];
@@ -118,6 +119,10 @@ const DEFAULT_WEBGL_OPTIONS: Required<CanvasViewerOptions> = {
 };
 
 export class CadWebGLRenderer {
+  captureCanvas(): HTMLCanvasElement {
+    this.render();
+    return captureCanvasLayers([this.canvas, ...(this.overlayCanvas ? [this.overlayCanvas] : [])]);
+  }
   readonly canvas: HTMLCanvasElement;
   readonly backend = 'webgl' as const;
   private readonly gl: GL;
