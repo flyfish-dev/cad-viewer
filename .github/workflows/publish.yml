@@ -4,21 +4,53 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Stable release tag to verify and publish
+        required: true
+        type: string
+      dry_run:
+        description: Verify without publishing
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name || inputs.release_tag }}
+  cancel-in-progress: false
+
 jobs:
   publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.release.prerelease == false && github.event.release.draft == false)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.release_tag }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: npm
-      - run: npm ci
-      - name: Publish package with npm trusted publishing
-        run: npm publish --access public --provenance
+      - run: npm ci --ignore-scripts
+      - run: node --test .github/scripts/publish-npm.test.mjs
+      - run: npm run typecheck
+      - run: npm test
+      - name: Publish the verified package with provenance
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            node .github/scripts/publish-npm.mjs --dry-run
+          else
+            node .github/scripts/publish-npm.mjs
+          fi
