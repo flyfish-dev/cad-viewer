@@ -1,4 +1,4 @@
-import { normalizeCadEntity, stringOrUndefined } from '../../core/entity';
+import { normalizeCadEntity, stringOrUndefined } from '../../core/entity.js';
 import type {
   CadDataLink,
   CadDataTable,
@@ -12,7 +12,7 @@ import type {
   CadXData,
   CadXDataEntry,
   CadXRecord
-} from '../../core/types';
+} from '../../core/types.js';
 
 interface DxfPair {
   code: number;

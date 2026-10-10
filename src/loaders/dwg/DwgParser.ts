@@ -1,8 +1,8 @@
-import { addBlock, addLayer, addLineType, createCadDocument, normalizeCadDataValue, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity';
-import { exactArrayBuffer } from '../../core/format';
-import { multiplyMatrix, rotationMatrix } from '../../core/transform';
-import type { CadBlock, CadDataLink, CadDataTable, CadDataTableColumn, CadDataValue, CadDictionary, CadDocument, CadEntity, CadLayer, CadLineType, CadLoadOptions, CadLoadProgress, CadLoadResult, CadPoint3D, CadSavedView, CadSceneTransform2D, CadXRecord } from '../../core/types';
-import { readDwgVersion } from './dwgVersion';
+import { addBlock, addLayer, addLineType, createCadDocument, normalizeCadDataValue, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity.js';
+import { exactArrayBuffer } from '../../core/format.js';
+import { multiplyMatrix, rotationMatrix } from '../../core/transform.js';
+import type { CadBlock, CadDataLink, CadDataTable, CadDataTableColumn, CadDataValue, CadDictionary, CadDocument, CadEntity, CadLayer, CadLineType, CadLoadOptions, CadLoadProgress, CadLoadResult, CadPoint3D, CadSavedView, CadSceneTransform2D, CadXRecord } from '../../core/types.js';
+import { readDwgVersion } from './dwgVersion.js';
 
 interface LibreDwgModule {
   Dwg_File_Type?: Record<string, number>;

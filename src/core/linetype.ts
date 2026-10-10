@@ -1,5 +1,5 @@
-import type { CadDocument, CadEntity, CadLayer, CadLineType, CadPoint2D } from './types';
-import type { CadShxGlyph } from './shx';
+import type { CadDocument, CadEntity, CadLayer, CadLineType, CadPoint2D } from './types.js';
+import type { CadShxGlyph } from './shx.js';
 
 export interface ResolvedCadLinePattern {
   name: string;

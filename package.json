@@ -1,6 +1,6 @@
 {
   "name": "@flyfish-dev/cad-viewer",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "A production-oriented browser CAD viewer for DWG, DXF, DWF, DWFx and XPS with worker-backed LibreDWG WASM, WebGL/Canvas rendering, external SHX references and native DWF support.",
   "type": "module",
   "license": "AGPL-3.0-only",

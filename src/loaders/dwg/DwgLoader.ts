@@ -1,6 +1,6 @@
-import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
-import type { CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader } from '../../core/types';
-import { DwgWorkerClient, supportsDwgWorker } from './DwgWorkerClient';
+import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format.js';
+import type { CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader } from '../../core/types.js';
+import { DwgWorkerClient, supportsDwgWorker } from './DwgWorkerClient.js';
 
 export class DwgLoader implements CadLoader {
   readonly id = 'dwg';
@@ -58,7 +58,7 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-export { DwgWorkerClient, supportsDwgWorker } from './DwgWorkerClient';
+export { DwgWorkerClient, supportsDwgWorker } from './DwgWorkerClient.js';
 
 function normalizeWorkerError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);

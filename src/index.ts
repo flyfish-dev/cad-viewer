@@ -1,29 +1,28 @@
-import './styles.css';
-export { CadViewer, createCadViewer } from './viewer/CadViewer';
-export type { CadViewerLoadResult, CadViewerOptions, CadViewerRendererBackend, CadRenderer } from './viewer/CadViewer';
+export { CadViewer, createCadViewer } from './viewer/CadViewer.js';
+export type { CadViewerLoadResult, CadViewerOptions, CadViewerRendererBackend, CadRenderer } from './viewer/CadViewer.js';
 
-export { CadCanvasRenderer } from './viewer/CadCanvasRenderer';
-export { CadWebGLRenderer, isWebGLAvailable } from './viewer/CadWebGLRenderer';
-export type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './viewer/CadCanvasRenderer';
+export { CadCanvasRenderer } from './viewer/CadCanvasRenderer.js';
+export { CadWebGLRenderer, isWebGLAvailable } from './viewer/CadWebGLRenderer.js';
+export type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './viewer/CadCanvasRenderer.js';
 
-export { CadLoaderRegistry, createDefaultLoaderRegistry, DwgLoader, DwgWorkerClient, DxfLoader, DwfLoader, supportsDwgWorker } from './loaders';
+export { CadLoaderRegistry, createDefaultLoaderRegistry, DwgLoader, DwgWorkerClient, DxfLoader, DwfLoader, supportsDwgWorker } from './loaders/index.js';
 
-export { cadEntityWorldStrokeWidth, createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadDataValue, normalizeCadEntity, normalizeCadTableData, summarizeCadDocument } from './core/entity';
-export { extractCadBom, serializeCadBomCsv, serializeCadBomJson } from './core/bom';
-export { computeCadDocumentBounds, resolveCadFitBounds, resolveCadSavedViewBounds } from './core/bounds';
-export type { CadBoundsOptions } from './core/bounds';
-export { createCadSceneDocument } from './core/scene';
-export { createCadRenderDocument, readCadColorPolicy } from './core/colorPolicy';
-export type { CadColorMode, CadColorPolicy } from './core/colorPolicy';
-export { applyByBlockLineTypeInheritance, createDashedCadPrimitives, createDashedCadSegments, resolveCadLinePattern, resolveCadLineTypeReference, transformCadLineTypeGlyph } from './core/linetype';
-export type { CadDashedPrimitives, CadLineTypeMarker, ResolvedCadLinePattern, ResolvedCadLinePatternRun } from './core/linetype';
-export { CadShxFontRegistry } from './core/shx';
-export type { CadShxGlyph, CadShxGlyphResolver } from './core/shx';
-export { normalizeDwgDatabase } from './loaders/dwg/DwgParser';
-export { detectCadFormat, readInputBytes } from './core/format';
-export { isCadNativeRenderableLoader } from './core/types';
-export { applyByBlockColorInheritance, applyCadColorPolicy, colorFromAci, colorFromTrueColor, resolveCadColor, resolveFillColor } from './core/color';
-export type { CadColorContrastMode, ColorResolveOptions } from './core/color';
+export { cadEntityWorldStrokeWidth, createCadDocument, inferEntityKind, isCadPolylineClosed, normalizeCadDataValue, normalizeCadEntity, normalizeCadTableData, summarizeCadDocument } from './core/entity.js';
+export { extractCadBom, serializeCadBomCsv, serializeCadBomJson } from './core/bom.js';
+export { computeCadDocumentBounds, resolveCadFitBounds, resolveCadSavedViewBounds } from './core/bounds.js';
+export type { CadBoundsOptions } from './core/bounds.js';
+export { createCadSceneDocument } from './core/scene.js';
+export { createCadRenderDocument, readCadColorPolicy } from './core/colorPolicy.js';
+export type { CadColorMode, CadColorPolicy } from './core/colorPolicy.js';
+export { applyByBlockLineTypeInheritance, createDashedCadPrimitives, createDashedCadSegments, resolveCadLinePattern, resolveCadLineTypeReference, transformCadLineTypeGlyph } from './core/linetype.js';
+export type { CadDashedPrimitives, CadLineTypeMarker, ResolvedCadLinePattern, ResolvedCadLinePatternRun } from './core/linetype.js';
+export { CadShxFontRegistry } from './core/shx.js';
+export type { CadShxGlyph, CadShxGlyphResolver } from './core/shx.js';
+export { normalizeDwgDatabase } from './loaders/dwg/DwgParser.js';
+export { detectCadFormat, readInputBytes } from './core/format.js';
+export { isCadNativeRenderableLoader } from './core/types.js';
+export { applyByBlockColorInheritance, applyCadColorPolicy, colorFromAci, colorFromTrueColor, resolveCadColor, resolveFillColor } from './core/color.js';
+export type { CadColorContrastMode, ColorResolveOptions } from './core/color.js';
 
 export type {
   CadBlock,
@@ -79,4 +78,4 @@ export type {
   CadXRecord,
   CadXRecordGroup,
   CadSummary
-} from './core/types';
+} from './core/types.js';

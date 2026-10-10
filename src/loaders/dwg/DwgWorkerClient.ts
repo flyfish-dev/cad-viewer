@@ -1,5 +1,5 @@
-import { exactArrayBuffer } from '../../core/format';
-import type { CadLoadInput, CadLoadOptions, CadLoadProgress, CadLoadResult } from '../../core/types';
+import { exactArrayBuffer } from '../../core/format.js';
+import type { CadLoadInput, CadLoadOptions, CadLoadProgress, CadLoadResult } from '../../core/types.js';
 
 export interface DwgWorkerLoadOptions extends CadLoadOptions {
   fileName?: string;

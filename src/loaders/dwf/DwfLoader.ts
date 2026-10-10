@@ -1,8 +1,8 @@
 import { DwfViewer, openDwfDocument, type DwfViewerOptions, type LoadedDwfDocument, type LoadOptions as DwfLoadOptions, type PageData, type RenderStats as DwfRenderStats, type W2dPrimitive } from 'dwf-viewer';
-import { createCadDocument, flattenPages } from '../../core/entity';
-import { captureCanvasLayers } from '../../viewer/captureCanvas';
-import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
-import type { CadDocument, CadEntity, CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadNativeRenderableLoader, CadPage, CadPathCommand, CadPoint3D } from '../../core/types';
+import { createCadDocument, flattenPages } from '../../core/entity.js';
+import { captureCanvasLayers } from '../../viewer/captureCanvas.js';
+import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format.js';
+import type { CadDocument, CadEntity, CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadNativeRenderableLoader, CadPage, CadPathCommand, CadPoint3D } from '../../core/types.js';
 
 type CadColorLoadOptions = CadLoadOptions & {
   colorMode?: 'source' | 'monochrome';

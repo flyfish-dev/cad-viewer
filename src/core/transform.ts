@@ -1,4 +1,4 @@
-import type { CadEntity, CadPathCommand, CadPoint2D, CadPoint3D } from './types';
+import type { CadEntity, CadPathCommand, CadPoint2D, CadPoint3D } from './types.js';
 
 export interface Matrix2D {
   a: number;

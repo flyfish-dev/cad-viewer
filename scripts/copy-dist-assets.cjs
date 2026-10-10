@@ -40,7 +40,7 @@ fs.writeFileSync(
 );
 fs.writeFileSync(
   path.join(dist, 'index.d.ts'),
-  "export * from './types/index';\n",
+  "export * from './types/index.js';\n",
   'utf8'
 );
 

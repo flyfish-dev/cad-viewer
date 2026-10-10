@@ -18,7 +18,7 @@ import type {
   CadTableCell,
   CadXData,
   CadXRecord
-} from './types';
+} from './types.js';
 
 const ALL_SOURCES: readonly CadBomSourceKind[] = [
   'block-attributes',
