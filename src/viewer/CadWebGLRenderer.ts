@@ -1,14 +1,14 @@
-import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor } from '../core/color';
-import { computeCadDocumentBounds, resolveCadFitBounds } from '../core/bounds';
-import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includePoint, isFinitePoint, stripMTextFormatting, xy } from '../core/geometry';
-import { cadEntityWorldStrokeWidth, inferEntityKind, isCadPolylineClosed } from '../core/entity';
-import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern, transformCadLineTypeGlyph, type CadLineTypeMarker } from '../core/linetype';
-import { createCadSceneDocument } from '../core/scene';
-import { EMPTY_SHX_GLYPH_RESOLVER, type CadShxGlyph } from '../core/shx';
-import { matrixFromInsert, transformEntity } from '../core/transform';
-import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types';
-import type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './CadCanvasRenderer';
-import { captureCanvasLayers } from './captureCanvas';
+import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor } from '../core/color.js';
+import { computeCadDocumentBounds, resolveCadFitBounds } from '../core/bounds.js';
+import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includePoint, isFinitePoint, stripMTextFormatting, xy } from '../core/geometry.js';
+import { cadEntityWorldStrokeWidth, inferEntityKind, isCadPolylineClosed } from '../core/entity.js';
+import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern, transformCadLineTypeGlyph, type CadLineTypeMarker } from '../core/linetype.js';
+import { createCadSceneDocument } from '../core/scene.js';
+import { EMPTY_SHX_GLYPH_RESOLVER, type CadShxGlyph } from '../core/shx.js';
+import { matrixFromInsert, transformEntity } from '../core/transform.js';
+import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode, CadPathCommand, CadPoint2D, CadPoint3D } from '../core/types.js';
+import type { CanvasViewerOptions, RenderStats, ViewChangeEvent, ViewState } from './CadCanvasRenderer.js';
+import { captureCanvasLayers } from './captureCanvas.js';
 
 type GL = WebGLRenderingContext | WebGL2RenderingContext;
 type GlMode = WebGLRenderingContext['LINES'] | WebGLRenderingContext['TRIANGLES'] | WebGLRenderingContext['POINTS'];

@@ -6,7 +6,7 @@ import type {
   CadPoint2D,
   CadReferenceInput,
   CadReferenceState
-} from './types';
+} from './types.js';
 
 export interface CadShxGlyph {
   polylines: ReadonlyArray<ReadonlyArray<CadPoint2D>>;

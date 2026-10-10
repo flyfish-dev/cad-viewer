@@ -20,7 +20,7 @@ export default defineConfig({
     // Keep library entrypoints parseable by Vue 2 / Webpack 4 consumers.
     target: 'es2018',
     lib: {
-      entry: pathResolve(__dirname, 'src/index.ts'),
+      entry: pathResolve(__dirname, 'src/browser.ts'),
       name: 'LightweightCadViewer',
       formats: ['es', 'umd'],
       fileName: (format) => format === 'es' ? 'cad-viewer.es.js' : 'cad-viewer.umd.cjs',

@@ -1,5 +1,5 @@
-import type { CadDocument, CadSceneTransform2D } from './types';
-import { IDENTITY_MATRIX, transformEntity } from './transform';
+import type { CadDocument, CadSceneTransform2D } from './types.js';
+import { IDENTITY_MATRIX, transformEntity } from './transform.js';
 
 const isIdentity = (matrix: CadSceneTransform2D) => {
   return Math.abs(matrix.a - 1) < 1e-12

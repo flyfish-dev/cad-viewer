@@ -1,5 +1,5 @@
-import { readCadColorPolicy, type CadColorMode } from './colorPolicy';
-import type { CadDocument, CadEntity, CadLayer } from './types';
+import { readCadColorPolicy, type CadColorMode } from './colorPolicy.js';
+import type { CadDocument, CadEntity, CadLayer } from './types.js';
 
 const BASE_ACI: Record<number, string> = {
   1: '#ff0000', 2: '#ffff00', 3: '#00ff00', 4: '#00ffff', 5: '#0000ff', 6: '#ff00ff',

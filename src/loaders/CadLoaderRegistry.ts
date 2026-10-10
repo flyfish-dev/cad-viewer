@@ -1,5 +1,5 @@
-import { detectCadFormat, readInputBytes } from '../core/format';
-import type { CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader } from '../core/types';
+import { detectCadFormat, readInputBytes } from '../core/format.js';
+import type { CadFormat, CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader } from '../core/types.js';
 
 export class CadLoaderRegistry {
   private readonly loaders: CadLoader[] = [];

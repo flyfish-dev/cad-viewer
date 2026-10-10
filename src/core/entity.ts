@@ -12,7 +12,7 @@ import type {
   CadTableData,
   CadXData,
   CadXDataEntry
-} from './types';
+} from './types.js';
 
 export interface NormalizeCadEntityOptions {
   /** Preserve the parser-owned raw object on entity.raw. This can be very large and may not be structured-clone safe. */

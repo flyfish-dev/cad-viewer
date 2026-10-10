@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 
-import { createLibreDwg, parseDwgBytes } from './DwgParser';
-import type { CadLoadOptions, CadLoadProgress } from '../../core/types';
+import { createLibreDwg, parseDwgBytes } from './DwgParser.js';
+import type { CadLoadOptions, CadLoadProgress } from '../../core/types.js';
 
 type DwgWorkerLoadRequest = {
   type: 'load';

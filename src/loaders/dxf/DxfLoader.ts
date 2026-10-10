@@ -1,8 +1,8 @@
-import { addBlock, addLayer, createCadDocument, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity';
-import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format';
-import { degreesToRadians } from '../../core/geometry';
-import type { CadBlock, CadDocument, CadEntity, CadLayer, CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader, CadPoint3D } from '../../core/types';
-import { applyDxfBomSupplement, parseDxfBomSupplement } from './DxfBomSupplement';
+import { addBlock, addLayer, createCadDocument, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity.js';
+import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format.js';
+import { degreesToRadians } from '../../core/geometry.js';
+import type { CadBlock, CadDocument, CadEntity, CadLayer, CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader, CadPoint3D } from '../../core/types.js';
+import { applyDxfBomSupplement, parseDxfBomSupplement } from './DxfBomSupplement.js';
 
 export class DxfLoader implements CadLoader {
   readonly id = 'dxf';

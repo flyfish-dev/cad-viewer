@@ -1,4 +1,4 @@
-import type { CadFormat, CadLoadInput } from './types';
+import type { CadFormat, CadLoadInput } from './types.js';
 
 export async function readInputBytes(input: CadLoadInput): Promise<Uint8Array> {
   if (input.buffer instanceof Uint8Array) return input.buffer;

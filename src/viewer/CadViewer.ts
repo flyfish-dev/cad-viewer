@@ -1,12 +1,12 @@
-import { createDefaultLoaderRegistry } from '../loaders';
-import type { CadLoaderRegistry } from '../loaders/CadLoaderRegistry';
-import { summarizeCadDocument } from '../core/entity';
-import { extractCadBom } from '../core/bom';
-import { createCadRenderDocument, type CadColorMode } from '../core/colorPolicy';
-import { CadShxFontRegistry, synchronizeCadDocumentReferences, type CadShxGlyphResolver } from '../core/shx';
-import { isCadNativeRenderableLoader, type CadBom, type CadBomOptions, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadedReference, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadMissingReference, type CadNativeRenderableLoader, type CadReferenceInput, type CadReferenceState } from '../core/types';
-import { CadCanvasRenderer, type CanvasViewerOptions, type RenderStats, type ViewChangeEvent } from './CadCanvasRenderer';
-import { CadWebGLRenderer, isWebGLAvailable } from './CadWebGLRenderer';
+import { createDefaultLoaderRegistry } from '../loaders/index.js';
+import type { CadLoaderRegistry } from '../loaders/CadLoaderRegistry.js';
+import { summarizeCadDocument } from '../core/entity.js';
+import { extractCadBom } from '../core/bom.js';
+import { createCadRenderDocument, type CadColorMode } from '../core/colorPolicy.js';
+import { CadShxFontRegistry, synchronizeCadDocumentReferences, type CadShxGlyphResolver } from '../core/shx.js';
+import { isCadNativeRenderableLoader, type CadBom, type CadBomOptions, type CadDocument, type CadFitMode, type CadLoadInput, type CadLoadedReference, type CadLoadOptions, type CadLoadProgress, type CadLoadResult, type CadLoader, type CadMissingReference, type CadNativeRenderableLoader, type CadReferenceInput, type CadReferenceState } from '../core/types.js';
+import { CadCanvasRenderer, type CanvasViewerOptions, type RenderStats, type ViewChangeEvent } from './CadCanvasRenderer.js';
+import { CadWebGLRenderer, isWebGLAvailable } from './CadWebGLRenderer.js';
 
 export type CadViewerRendererBackend = 'auto' | 'webgl' | 'canvas2d';
 export type CadRenderer = CadCanvasRenderer | CadWebGLRenderer;

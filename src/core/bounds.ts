@@ -1,7 +1,7 @@
-import { inferEntityKind } from './entity';
-import { boundsValid, ellipsePoints, emptyBounds, includeCircle, includePoint, isFinitePoint, mergeBounds, paddedBounds } from './geometry';
-import { matrixFromInsert, transformEntity } from './transform';
-import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode } from './types';
+import { inferEntityKind } from './entity.js';
+import { boundsValid, ellipsePoints, emptyBounds, includeCircle, includePoint, isFinitePoint, mergeBounds, paddedBounds } from './geometry.js';
+import { matrixFromInsert, transformEntity } from './transform.js';
+import type { CadBlock, CadBounds, CadDocument, CadEntity, CadFitMode } from './types.js';
 
 export interface CadBoundsOptions {
   maxInsertDepth?: number;

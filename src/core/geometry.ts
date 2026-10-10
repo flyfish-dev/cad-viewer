@@ -1,4 +1,4 @@
-import type { CadBounds, CadPoint2D, CadPoint3D } from './types';
+import type { CadBounds, CadPoint2D, CadPoint3D } from './types.js';
 
 export function emptyBounds(): CadBounds {
   return { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };

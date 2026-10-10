@@ -1,4 +1,4 @@
-import type { CadDocument } from './types';
+import type { CadDocument } from './types.js';
 
 export type CadColorMode = 'source' | 'monochrome';
 
