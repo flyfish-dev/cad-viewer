@@ -25,6 +25,11 @@ if (args[0] === 'pack') {
     console.log(JSON.stringify({error: {code: 'E401'}}))
     process.exit(1)
   }
+  if (process.env.MODE === 'delayed-visibility' && fs.existsSync(path.join(cwd, 'published')) && !fs.existsSync(path.join(cwd, 'first-read'))) {
+    fs.writeFileSync(path.join(cwd, 'first-read'), '')
+    console.log(JSON.stringify({error: {code: 'E404'}}))
+    process.exit(1)
+  }
   if (['same', 'collision'].includes(process.env.MODE) || fs.existsSync(path.join(cwd, 'published'))) {
     console.log(JSON.stringify({name: pkg.name, version: pkg.version, 'dist.integrity': process.env.MODE === 'collision' ? 'different' : integrity}))
   } else {
@@ -37,7 +42,7 @@ if (args[0] === 'pack') {
 } else process.exit(2)
 `
 
-async function run(t, { mode = 'absent', dryRun = true, env = {}, repository = 'https://github.com/owner/project' } = {}) {
+async function run(t, { mode = 'absent', dryRun = true, env = {}, fastClock = false, repository = 'https://github.com/owner/project' } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'upstream-publisher-test-'))
   t.after(() => rm(dir, { recursive: true, force: true }))
   const scripts = join(dir, '.github/scripts')
@@ -45,11 +50,22 @@ async function run(t, { mode = 'absent', dryRun = true, env = {}, repository = '
   await mkdir(scripts, { recursive: true })
   await mkdir(bin)
   await copyFile(fileURLToPath(new URL('./publish-npm.mjs', import.meta.url)), join(scripts, 'publish-npm.mjs'))
+  await copyFile(fileURLToPath(new URL('./registry-propagation.mjs', import.meta.url)), join(scripts, 'registry-propagation.mjs'))
   await writeFile(join(dir, 'package.json'), JSON.stringify({
     name: '@owner/fixture', version: '0.1.0', repository: { type: 'git', url: repository }
   }))
   await writeFile(join(bin, 'npm'), mock, { mode: 0o755 })
-  const result = spawnSync(process.execPath, [join(scripts, 'publish-npm.mjs'), ...(dryRun ? ['--dry-run'] : [])], {
+  const clock = join(dir, 'clock.mjs')
+  if (fastClock) await writeFile(clock, `
+    let elapsed = 0
+    const schedule = globalThis.setTimeout
+    globalThis.performance = { now: () => elapsed }
+    globalThis.setTimeout = (callback, ms) => {
+      elapsed += ms
+      return schedule(callback, 0)
+    }
+  `)
+  const result = spawnSync(process.execPath, [...(fastClock ? ['--import', clock] : []), join(scripts, 'publish-npm.mjs'), ...(dryRun ? ['--dry-run'] : [])], {
     cwd: dir, encoding: 'utf8', timeout: 20_000,
     env: {
       PATH: [bin, dirname(process.execPath)].join(':'),
@@ -88,6 +104,22 @@ test('accepts an identical existing package without publishing again', async t =
   assert(!result.calls.some(args => args[0] === 'publish'))
 })
 
+test('a workflow retry verifies the existing version without writing', async t => {
+  const result = await run(t, { mode: 'same', dryRun: false, env: { GITHUB_RUN_ATTEMPT: '2' } })
+  assert.equal(result.status, 0, result.output)
+  assert(!result.calls.some(args => args[0] === 'publish'))
+  assert.match(result.output, /verified-existing/)
+})
+
+test('a workflow retry with a missing version stops after read-only waiting', async t => {
+  const result = await run(t, { dryRun: false, fastClock: true, env: { GITHUB_RUN_ATTEMPT: '2' } })
+  assert.notEqual(result.status, 0)
+  assert(!result.calls.some(args => args[0] === 'publish'))
+  assert(result.calls.filter(args => args[0] === 'view').length > 1)
+  assert.match(result.output, /verification-pending/)
+  assert.match(result.output, /Do not publish again/)
+})
+
 for (const mode of ['collision', 'registry-error', 'bad-pack']) test('fails closed on ' + mode, async t => {
   const result = await run(t, { mode, dryRun: false })
   assert.notEqual(result.status, 0)
@@ -102,10 +134,22 @@ test('publishes once with provenance and reads back the same integrity', async t
   assert(writes[0].includes('--provenance'))
   assert(writes[0].includes('--ignore-scripts'))
   assert.equal(result.calls.at(-1)[0], 'view')
+  assert.match(result.output, /publish-accepted/)
+  assert.match(result.output, /published-and-verified/)
 })
 
 test('does not retry an uncertain write', async t => {
   const result = await run(t, { mode: 'uncertain-write', dryRun: false })
   assert.notEqual(result.status, 0)
   assert.equal(result.calls.filter(args => args[0] === 'publish').length, 1)
+  assert.match(result.output, /publish-result-uncertain/)
+})
+
+test('waits for delayed registry visibility after exactly one accepted publish', async t => {
+  const result = await run(t, { mode: 'delayed-visibility', dryRun: false, fastClock: true })
+  assert.equal(result.status, 0, result.output)
+  assert.equal(result.calls.filter(args => args[0] === 'publish').length, 1)
+  assert.equal(result.calls.filter(args => args[0] === 'view').length, 3)
+  assert.match(result.output, /publish-accepted/)
+  assert.match(result.output, /published-and-verified/)
 })
