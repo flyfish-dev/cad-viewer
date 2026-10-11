@@ -39,9 +39,11 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-          cache: npm
+          package-manager-cache: false
+      - name: Use the verified npm client
+        run: npm install --global npm@11.19.1 --ignore-scripts --no-audit --no-fund
       - run: npm ci --ignore-scripts
-      - run: node --test .github/scripts/publish-npm.test.mjs
+      - run: node --test .github/scripts/*.test.mjs
       - run: npm run typecheck
       - run: npm test
       - name: Publish the verified package with provenance

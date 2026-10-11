@@ -19,20 +19,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm test
       - run: npm run build:demo
       - run: npm run check:wasm
       - run: npm run pack:dry
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cad-viewer-demo-${{ github.sha }}
-          path: dist-demo
-          if-no-files-found: error
-          retention-days: 7
