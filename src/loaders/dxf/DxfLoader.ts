@@ -229,11 +229,21 @@ export function decodeDxfText(bytes: Uint8Array, preferredEncoding?: string): st
   const bomEncoding = detectBomEncoding(bytes);
   if (bomEncoding) return decodeBytes(bytes, bomEncoding);
 
-  const declaredEncoding = normalizeDxfEncoding(detectDxfCodePage(bytes));
-  if (declaredEncoding) return decodeBytes(bytes, declaredEncoding);
-
   const utf8 = decodeBytes(bytes, 'utf-8');
-  if (!utf8.includes('\uFFFD')) return utf8;
+  const utf8IsClean = !utf8.includes('\uFFFD');
+  const declaredEncoding = normalizeDxfEncoding(detectDxfCodePage(bytes));
+
+  // DXF R2007 (AC1021) and later store text as UTF-8 by specification, but
+  // many exporters keep a stale legacy $DWGCODEPAGE in the header. Valid
+  // UTF-8 bytes must win over that declaration, otherwise CJK text turns into
+  // mojibake. Legacy files that are not valid UTF-8 still use the declared
+  // codepage below.
+  if (utf8IsClean && (declaredEncoding === 'utf-8' || isUtf8DxfVersion(detectDxfVersion(bytes)))) {
+    return utf8;
+  }
+
+  if (declaredEncoding) return decodeBytes(bytes, declaredEncoding);
+  if (utf8IsClean) return utf8;
 
   return chooseBestLegacyDxfDecode(bytes);
 }
@@ -291,18 +301,32 @@ function detectBomEncoding(bytes: Uint8Array): string | undefined {
   return undefined;
 }
 
-function detectDxfCodePage(bytes: Uint8Array): string | undefined {
+function readDxfHeaderValue(bytes: Uint8Array, variable: string, valueCode: string): string | undefined {
   const header = decodeBytes(bytes.subarray(0, Math.min(bytes.byteLength, 128 * 1024)), 'iso-8859-1');
   const lines = header.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   for (let index = 0; index < lines.length - 3; index++) {
-    if (lines[index]?.trim() !== '9' || lines[index + 1]?.trim().toUpperCase() !== '$DWGCODEPAGE') continue;
+    if (lines[index]?.trim() !== '9' || lines[index + 1]?.trim().toUpperCase() !== variable) continue;
     for (let cursor = index + 2; cursor < Math.min(index + 10, lines.length - 1); cursor += 2) {
-      const code = lines[cursor]?.trim();
-      const value = lines[cursor + 1]?.trim();
-      if (code === '3' && value) return value;
+      if (lines[cursor]?.trim() === valueCode) {
+        const value = lines[cursor + 1]?.trim();
+        if (value) return value;
+      }
     }
   }
   return undefined;
+}
+
+function detectDxfVersion(bytes: Uint8Array): string | undefined {
+  return readDxfHeaderValue(bytes, '$ACADVER', '1')?.toUpperCase();
+}
+
+function isUtf8DxfVersion(version: string | undefined): boolean {
+  const match = version ? /^AC(\d{4})$/.exec(version) : null;
+  return !!match && Number(match[1]) >= 1021;
+}
+
+function detectDxfCodePage(bytes: Uint8Array): string | undefined {
+  return readDxfHeaderValue(bytes, '$DWGCODEPAGE', '3');
 }
 
 function normalizeDxfEncoding(value: string | undefined): string | undefined {
@@ -366,7 +390,10 @@ function normalizeDxfText(value: unknown): string | undefined {
   const text = stringOrUndefined(value);
   if (text === undefined) return undefined;
   return text
-    .replace(/\\U\+([0-9a-fA-F]{4,6})/g, (match, code: string) => {
+    // AutoCAD writes \U+XXXX as a four-digit UTF-16 code unit; non-BMP
+    // characters arrive as two consecutive escapes (surrogate pair). Matching
+    // more than four digits swallows following literal text such as "3D".
+    .replace(/\\U\+([0-9a-fA-F]{4})/g, (match, code: string) => {
       const point = Number.parseInt(code, 16);
       return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : match;
     })
