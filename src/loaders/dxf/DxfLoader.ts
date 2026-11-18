@@ -139,9 +139,13 @@ function extractDxfLayers(raw: Record<string, unknown>): Record<string, CadLayer
       color: (rec.color ?? rec.colorNumber ?? rec.colorIndex) as string | number | undefined,
       colorIndex: numberOrUndefined(rec.colorNumber ?? rec.colorIndex ?? rec.color),
       lineType: stringOrUndefined(rec.lineType ?? rec.linetype),
-      isVisible: Number(rec.colorNumber ?? rec.colorIndex ?? rec.color ?? 1) >= 0,
-      isFrozen: Boolean(rec.frozen),
-      isLocked: Boolean(rec.locked),
+      // dxf-parser stores a negative layer color (62 < 0) as Math.abs(color)
+      // plus visible:false, so the sign alone cannot detect a turned-off layer.
+      isVisible: rec.isVisible === false || rec.visible === false || rec.off === true
+        ? false
+        : Number(rec.colorNumber ?? rec.colorIndex ?? rec.color ?? 1) >= 0,
+      isFrozen: Boolean(rec.isFrozen ?? rec.frozen),
+      isLocked: Boolean(rec.isLocked ?? rec.locked),
       raw: rec
     });
   }
@@ -181,6 +185,7 @@ function expandRecords(value: unknown): unknown[] {
   if (Array.isArray(rec.entries)) return rec.entries;
   if (Array.isArray(rec.records)) return rec.records;
   if (Array.isArray(rec.layers)) return rec.layers;
+  if (rec.layers && typeof rec.layers === 'object') return Object.values(rec.layers as Record<string, unknown>);
   return Object.values(rec).filter((x) => x && typeof x === 'object');
 }
 
