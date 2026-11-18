@@ -1,6 +1,7 @@
 import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor, type CadColorContrastMode } from '../core/color.js';
 import { computeCadDocumentBounds, resolveCadFitBounds } from '../core/bounds.js';
-import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, isFinitePoint, stripMTextFormatting, xy } from '../core/geometry.js';
+import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, isFinitePoint, xy } from '../core/geometry.js';
+import { paintCadText } from '../core/text.js';
 import { cadEntityWorldStrokeWidth, inferEntityKind, isCadPolylineClosed } from '../core/entity.js';
 import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern, transformCadLineTypeGlyph, type CadLineTypeMarker } from '../core/linetype.js';
 import { createCadSceneDocument } from '../core/scene.js';
@@ -476,10 +477,10 @@ export class CadCanvasRenderer {
   private drawText(e: CadEntity): void {
     const aligned = (Number(e.halign ?? 0) !== 0 || Number(e.valign ?? 0) !== 0) && isFinitePoint(e.endPoint);
     const p = (aligned ? e.endPoint : e.insertionPoint ?? e.startPoint ?? e.center) as CadPoint3D | undefined;
-    const text = stripMTextFormatting(String(e.text ?? e.value ?? ''));
+    const text = String(e.rawText ?? e.text ?? e.value ?? '');
     const height = Number(e.textHeight ?? e.height ?? 1);
-    if (!isFinitePoint(p) || !text) return this.markSkipped(String(e.type));
-    this.drawTextAt(e, p, text, height, Number(e.rotation ?? 0));
+    if (!isFinitePoint(p) || !text || !Number.isFinite(height) || height === 0) return this.markSkipped(String(e.type));
+    this.drawTextAt(e, p, height, Number(e.rotation ?? 0));
   }
 
   private drawInsert(e: CadEntity, depth: number): void {
@@ -519,6 +520,24 @@ export class CadCanvasRenderer {
   }
 
   private drawHatch(e: CadEntity): void {
+    if (e.hatch) {
+      if (e.hatch.status !== 'ready') return this.markSkipped('HATCH');
+      this.beginStyledPath(e, false, false);
+      for (const segment of e.hatch.segments) {
+        const a = this.worldToScreen(segment.start), b = this.worldToScreen(segment.end);
+        this.ctx.moveTo(a.x, a.y); this.ctx.lineTo(b.x, b.y);
+      }
+      this.ctx.stroke();
+      for (const point of e.hatch.dots) {
+        const p = this.worldToScreen(point);
+        this.ctx.beginPath();
+        this.ctx.arc(p.x, p.y, Math.max(0.5, this.ctx.lineWidth / 2), 0, Math.PI * 2);
+        this.ctx.fill();
+      }
+      this.ctx.restore();
+      this.stats.drawn++;
+      return;
+    }
     const loops = e.loops;
     if (!Array.isArray(loops) || loops.length === 0) return this.markSkipped('HATCH');
     this.beginStyledPath(e, true);
@@ -623,7 +642,7 @@ export class CadCanvasRenderer {
     this.finishStroke();
   }
 
-  private drawTextAt(e: CadEntity, p: CadPoint2D, text: string, height: number, rotation: number): void {
+  private drawTextAt(e: CadEntity, p: CadPoint2D, height: number, rotation: number): void {
     const ctx = this.ctx;
     const s = this.worldToScreen(p);
     ctx.save();
@@ -633,15 +652,10 @@ export class CadCanvasRenderer {
     const generationFlag = Number(e.generationFlag ?? 0);
     const xScale = Number(e.xScale ?? 1);
     ctx.scale((generationFlag & 2 ? -1 : 1) * (Number.isFinite(xScale) && Math.abs(xScale) > 1e-9 ? Math.abs(xScale) : 1), generationFlag & 4 ? -1 : 1);
-    const pixelHeight = Math.max(4, Math.min(256, Math.abs(height) * this.view.scale));
-    ctx.font = `${pixelHeight}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    const pixelHeight = Math.abs(height) * this.view.scale;
     ctx.fillStyle = resolveCadColor(e, this.document, { foreground: this.opts.foreground, background: this.opts.background, trueColorByteOrder: this.opts.trueColorByteOrder, contrastMode: this.opts.contrastMode, minColorContrast: this.opts.minColorContrast });
     ctx.globalAlpha = clamp(Number(e.opacity ?? 1), 0, 1);
-    const halign = Number(e.halign ?? 0);
-    const valign = Number(e.valign ?? 0);
-    ctx.textAlign = halign === 1 || halign === 4 ? 'center' : halign === 2 ? 'right' : 'left';
-    ctx.textBaseline = valign === 1 ? 'bottom' : valign === 2 ? 'middle' : valign === 3 ? 'top' : 'alphabetic';
-    for (const [index, line] of text.split(/\r?\n/g).entries()) ctx.fillText(line, 0, index * pixelHeight * 1.22);
+    paintCadText(ctx, e, pixelHeight);
     ctx.restore();
     this.stats.drawn++;
   }

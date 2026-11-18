@@ -1,4 +1,4 @@
-import { normalizeCadEntity, stringOrUndefined } from '../../core/entity.js';
+import { addLayer, normalizeCadEntity, stringOrUndefined } from '../../core/entity.js';
 import type {
   CadDataLink,
   CadDataTable,
@@ -7,6 +7,7 @@ import type {
   CadDictionary,
   CadDocument,
   CadEntity,
+  CadLayer,
   CadPoint3D,
   CadTableCell,
   CadXData,
@@ -53,6 +54,7 @@ const MAX_XDATA_ENTRIES_PER_ENTITY = 20_000;
 const MAX_XRECORD_VALUES = 100_000;
 
 export interface DxfBomSupplement {
+  layers: CadLayer[];
   attributes: DxfAttributeAttachment[];
   xdataByHandle: Map<string, CadXData[]>;
   xdataByLocator: DxfLocatedXData[];
@@ -75,6 +77,7 @@ export function parseDxfBomSupplement(text: string): DxfBomSupplement {
   const warnings: string[] = [];
   const records = splitDxfRecords(parseDxfPairs(text, warnings), warnings);
   const attributes: DxfAttributeAttachment[] = [];
+  const layers: CadLayer[] = [];
   const xdataByHandle = new Map<string, CadXData[]>();
   const xdataByLocator: DxfLocatedXData[] = [];
   const tables: Array<{ blockName?: string; locator?: DxfEntityLocator; entity: CadEntity }> = [];
@@ -88,6 +91,11 @@ export function parseDxfBomSupplement(text: string): DxfBomSupplement {
   const locatorCounters = new Map<string, number>();
 
   for (const record of records) {
+    if (record.section === 'TABLES' && record.type === 'LAYER') {
+      const layer = parseLayer(record);
+      if (layer) layers.push(layer);
+      continue;
+    }
     const context = canonicalContext(record.section, record.blockName);
     const locator = createRecordLocator(record, context, locatorCounters);
     const handle = readHandle(record.pairs, 5) ?? readHandle(record.pairs, 105);
@@ -146,10 +154,14 @@ export function parseDxfBomSupplement(text: string): DxfBomSupplement {
   }
 
   resolveXRecordNames(dictionaries, xrecords);
-  return { attributes, xdataByHandle, xdataByLocator, tables, dictionaries, xrecords, dataLinks, dataTables, warnings };
+  return { layers, attributes, xdataByHandle, xdataByLocator, tables, dictionaries, xrecords, dataLinks, dataTables, warnings };
 }
 
 export function applyDxfBomSupplement(document: CadDocument, supplement: DxfBomSupplement): void {
+  for (const layer of supplement.layers) {
+    const previous = Object.prototype.hasOwnProperty.call(document.layers, layer.name) ? document.layers[layer.name] : undefined;
+    addLayer(document.layers, { ...previous, ...layer });
+  }
   const entitiesByHandle = new Map<string, CadEntity>();
   const entitiesByLocator = new Map<string, CadEntity>();
   const allBlocks = new Set(Object.values(document.blocks));
@@ -299,12 +311,38 @@ function splitDxfRecords(pairs: DxfPair[], warnings: string[]): DxfRecord[] {
   return records;
 }
 
+/** Keep LAYER flags and appearance that dxf-parser does not expose. */
+function parseLayer(record: DxfRecord): CadLayer | undefined {
+  const name = readString(record.pairs, 2);
+  if (!name) return undefined;
+  const layer: CadLayer = { name };
+  const flags = readNumber(record.pairs, 70);
+  if (flags !== undefined && Number.isInteger(flags)) {
+    // Bit 2 applies to newly created viewports, not to the model-space layer.
+    layer.isFrozen = (flags & 1) !== 0;
+    layer.isLocked = (flags & 4) !== 0;
+  }
+  const aci = readNumber(record.pairs, 62);
+  if (aci !== undefined && Number.isInteger(aci) && Math.abs(aci) <= 256) {
+    layer.colorIndex = Math.abs(aci);
+    layer.isVisible = aci >= 0;
+  }
+  const trueColor = readNumber(record.pairs, 420);
+  if (trueColor !== undefined && Number.isInteger(trueColor) && trueColor >= 0 && trueColor <= 0xffffff) layer.trueColor = trueColor;
+  const lineType = readString(record.pairs, 6);
+  if (lineType !== undefined) layer.lineType = lineType;
+  const lineweight = readNumber(record.pairs, 370);
+  if (lineweight !== undefined) layer.lineweight = lineweight;
+  return layer;
+}
+
 function parseAttribute(record: DxfRecord, xdata: CadXData[]): CadEntity {
   const raw: Record<string, unknown> = {
     type: 'ATTRIB',
     handle: readHandle(record.pairs, 5),
     layer: readString(record.pairs, 8) ?? '0',
     text: decodeCadText(readJoined(record.pairs, [3, 1])),
+    rawText: readJoined(record.pairs, [3, 1]),
     tag: decodeCadText(readString(record.pairs, 2)),
     prompt: decodeCadText(readString(record.pairs, 3)),
     attributeFlags: readNumber(record.pairs, 70),
@@ -676,18 +714,13 @@ function isStringCode(code: number): boolean {
 function decodeCadText(value: unknown): string | undefined {
   const text = stringOrUndefined(value);
   if (text === undefined) return undefined;
-  return text
-    // Keep in sync with normalizeDxfText() in DxfLoader.ts: \U+XXXX is a
-    // four-digit UTF-16 code unit, so trailing literal hex text must not be
-    // consumed as part of the escape.
-    .replace(/\\U\+([0-9a-fA-F]{4})/g, (match, code: string) => {
-      const point = Number.parseInt(code, 16);
-      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : match;
-    })
-    .replace(/%%[cC]/g, '\u2205')
-    .replace(/%%[dD]/g, '\u00b0')
-    .replace(/%%[pP]/g, '\u00b1')
-    .replace(/\\P/g, '\n');
+  // Decode once and consume exactly four hexadecimal digits. Paired
+  // backslashes and characters produced by a Unicode escape stay literal.
+  return text.replace(/\\\\|\\U\+([0-9a-fA-F]{4})|%%([cCdDpP])|\\P/g, (match, code: string | undefined, symbol: string | undefined) => {
+    if (code) return String.fromCharCode(parseInt(code, 16));
+    if (symbol) return symbol.toLowerCase() === 'c' ? '\u2205' : symbol.toLowerCase() === 'd' ? '\u00b0' : '\u00b1';
+    return match === '\\P' ? '\n' : match;
+  });
 }
 
 function indexEntity(entity: CadEntity, target: Map<string, CadEntity>): void {

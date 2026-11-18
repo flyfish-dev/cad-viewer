@@ -172,8 +172,9 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
   const record = rawDb && typeof rawDb === 'object' ? rawDb as Record<string, unknown> : {};
   const layers = extractLayers(record, options);
   const shapeStyles = extractShxStyles(record);
+  const textStyles = extractTextStyles(record);
   const lineTypes = extractLineTypes(record, options, shapeStyles);
-  const blocks = extractBlocks(record, options);
+  const blocks = extractBlocks(record, options, textStyles);
   const header = normalizeHeader(record.header, version);
   const requiredShxFonts = extractRequiredShapeFonts(lineTypes);
   const savedViewResult = extractSavedView(record, header);
@@ -186,7 +187,7 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
   const normalizeOptions = { keepRaw: Boolean(options.keepRaw), includeUnknownProperties: Boolean(options.keepRaw) };
   const entities = rawEntities
     .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-    .map((item) => normalizeDwgEntity(item, normalizeOptions));
+    .map((item) => normalizeDwgEntity(item, normalizeOptions, textStyles));
 
   const document = createCadDocument({
     format: 'dwg',
@@ -221,6 +222,24 @@ export function normalizeDwgDatabase(rawDb: unknown, sourceName?: string, versio
   if (entities.length === 0) {
     document.warnings.push('DWG parsed successfully but no model-space entities were exposed by the converter. Check layout/paper-space content or unsupported proxy objects.');
   }
+  const hatchWarnings = new Set<string>();
+  const pendingEntityLists = [entities];
+  const visitedBlocks = new Set<CadBlock>();
+  // Unreferenced block definitions are not displayed. Keep their diagnostics on
+  // the entities, without reporting an unsupported fill in the visible drawing.
+  while (pendingEntityLists.length) {
+    for (const entity of pendingEntityLists.pop()!) {
+      for (const warning of entity.hatch?.diagnostics ?? []) hatchWarnings.add(warning);
+      if (entity.kind !== 'insert') continue;
+      const name = entity.blockName ?? entity.name;
+      const block = name ? blocks[name] ?? blocks[name.toLowerCase()] : undefined;
+      if (block && Array.isArray(block.entities) && !visitedBlocks.has(block)) {
+        visitedBlocks.add(block);
+        pendingEntityLists.push(block.entities);
+      }
+    }
+  }
+  for (const warning of hatchWarnings) document.warnings.push(warning);
   const uniqueLineTypes = new Set(Object.values(lineTypes));
   if ([...uniqueLineTypes].some((lineType) => lineType.pattern.some((element) => Number(element.elementTypeFlag ?? 0) !== 0))) {
     const dependency = requiredShxFonts.length > 0
@@ -639,8 +658,71 @@ function extractShxStyles(rawDb: Record<string, unknown>): DwgShxStyles {
   return { byReference, shapeFonts: [...shapeFonts] };
 }
 
-function normalizeDwgEntity(record: Record<string, unknown>, options: { keepRaw?: boolean; includeUnknownProperties?: boolean }): CadEntity {
+interface DwgTextStyle {
+  widthFactor?: number;
+  fontFamily?: string;
+}
+
+function extractTextStyles(rawDb: Record<string, unknown>): Map<string, DwgTextStyle> {
+  const tables = objectRecord(rawDb.tables);
+  const result = new Map<string, DwgTextStyle>();
+  for (const candidate of [rawDb.STYLE, rawDb.styles, tables?.STYLE, tables?.styles]) {
+    for (const item of expandCandidate(candidate)) {
+      const record = objectRecord(item);
+      if (!record) continue;
+      const widthFactor = numberOrUndefined(record.widthFactor ?? record.width_factor);
+      const font = stringOrUndefined(record.font ?? record.fontFileName ?? record.primaryFontFileName);
+      const basename = font?.split(/[\\/]/).pop();
+      const fontNames: Record<string, string> = {
+        'times.ttf': 'Times New Roman', 'arial.ttf': 'Arial', 'simhei.ttf': 'SimHei',
+        'simsun.ttf': 'SimSun', 'simfang.ttf': 'FangSong', 'simkai.ttf': 'KaiTi'
+      };
+      const fontFamily = basename && (Object.prototype.hasOwnProperty.call(fontNames, basename.toLowerCase())
+        ? fontNames[basename.toLowerCase()] : basename.replace(/\.(?:ttf|otf)$/i, ''));
+      const style: DwgTextStyle = {
+        widthFactor: widthFactor !== undefined && widthFactor > 0 ? widthFactor : undefined,
+        fontFamily: fontFamily || undefined
+      };
+      for (const reference of [record.name, record.handle, record.id]) {
+        const key = styleReferenceKey(reference);
+        if (key) result.set(key, style);
+      }
+    }
+  }
+  return result;
+}
+
+function applyDwgTextStyle(entity: CadEntity, record: Record<string, unknown>, styles: Map<string, DwgTextStyle>): void {
+  if (entity.kind === 'text') {
+    const nested = objectRecord(record.text);
+    const reference = record.styleName ?? record.textStyle ?? nested?.styleName ?? nested?.textStyle;
+    const style = styles.get(styleReferenceKey(reference));
+    if (style) {
+      if (entity.type === 'MTEXT') entity.textStyleWidthFactor ??= style.widthFactor;
+      else entity.xScale ??= style.widthFactor;
+      entity.fontFamily ??= style.fontFamily;
+    }
+    // libredwg-web 0.7.9 sets MTEXT.rotation to a placeholder zero. Its actual
+    // baseline direction is exposed separately; preserve it before worker transfer.
+    if (entity.type === 'MTEXT') {
+      const direction = pointFromUnknown(record.direction ?? record.x_axis_dir);
+      if (direction && Math.hypot(direction.x, direction.y) > 1e-12) {
+        entity.rotation = Math.atan2(direction.y, direction.x);
+      }
+    }
+  }
+  const attributes = record.attribs ?? record.attributes ?? record.attributeEntities;
+  if (entity.attribs && Array.isArray(attributes)) {
+    const rawAttributes = attributes.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object');
+    entity.attribs.forEach((attribute, index) => {
+      if (rawAttributes[index]) applyDwgTextStyle(attribute, rawAttributes[index], styles);
+    });
+  }
+}
+
+function normalizeDwgEntity(record: Record<string, unknown>, options: { keepRaw?: boolean; includeUnknownProperties?: boolean }, textStyles: Map<string, DwgTextStyle>): CadEntity {
   const entity = normalizeCadEntity(record, undefined, { ...options, numericColorMode: 'rgb' });
+  applyDwgTextStyle(entity, record, textStyles);
   const rgb = numberOrUndefined(record.color);
   // @mlightcad/libredwg-web exposes DwgEntity.color as a 24-bit RGB value,
   // while DXF parsers commonly expose `color` as an ACI index. DWG normalization
@@ -868,7 +950,7 @@ function isWorldUcs(
   return originWorld && xWorld && yWorld;
 }
 
-function extractBlocks(rawDb: Record<string, unknown>, options: { keepRaw?: boolean }): Record<string, CadBlock> {
+function extractBlocks(rawDb: Record<string, unknown>, options: { keepRaw?: boolean }, textStyles: Map<string, DwgTextStyle>): Record<string, CadBlock> {
   const result: Record<string, CadBlock> = {};
   const candidates: unknown[] = [rawDb.blocks, rawDb.blockHeaders, rawDb.block_records, rawDb.blockRecords];
   const tables = rawDb.tables as Record<string, unknown> | undefined;
@@ -882,7 +964,7 @@ function extractBlocks(rawDb: Record<string, unknown>, options: { keepRaw?: bool
       const rawEntities = Array.isArray(record.entities) ? record.entities : Array.isArray(record.ownedObjects) ? record.ownedObjects : [];
       const entities: CadEntity[] = rawEntities
         .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object')
-        .map((entry) => normalizeDwgEntity(entry, normalizeOptions));
+        .map((entry) => normalizeDwgEntity(entry, normalizeOptions, textStyles));
       addBlock(result, {
         name,
         basePoint: pointFromUnknown(record.basePoint ?? record.origin) ?? { x: 0, y: 0 },

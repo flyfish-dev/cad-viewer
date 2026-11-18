@@ -1,4 +1,5 @@
 import type { CadBounds, CadPoint2D, CadPoint3D } from './types.js';
+import { parseCadText } from './text.js';
 
 export function emptyBounds(): CadBounds {
   return { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
@@ -125,13 +126,7 @@ export function bulgeToPolylinePoints(p1: CadPoint2D, p2: CadPoint2D, bulge = 0,
 }
 
 export function stripMTextFormatting(text: string): string {
-  return text
-    .replace(/\\P/g, '\n')
-    .replace(/\\~|\\ /g, ' ')
-    .replace(/\\[A-Za-z][^;]*;/g, '')
-    .replace(/[{}]/g, '')
-    .replace(/\\[A-Za-z]/g, '')
-    .trim();
+  return parseCadText(text).text.trim();
 }
 
 export function clamp(value: number, min: number, max: number): number {

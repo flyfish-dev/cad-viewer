@@ -104,3 +104,64 @@ test('DXF R2007 UTF-8 text without a $DWGCODEPAGE declaration decodes as UTF-8',
   });
   assert.equal(text, '中文测试');
 });
+
+test('valid UTF-8 containing U+FFFD does not trigger a legacy decode', async () => {
+  const text = await loadTextField({
+    version: 'AC1032', codepage: 'ANSI_936', textBytes: Buffer.from('中文\uFFFD', 'utf8')
+  });
+  assert.equal(text, '中文\uFFFD');
+});
+
+test('non-UTF-8 bytes in a modern exporter still use the declared legacy codepage', async () => {
+  const text = await loadTextField({
+    version: 'AC1032', codepage: 'ANSI_936', textBytes: Buffer.from([0xd6, 0xd0, 0xce, 0xc4])
+  });
+  assert.equal(text, '中文');
+});
+
+test('legacy codepage wins even when its byte sequence is also valid UTF-8', async () => {
+  const text = await loadTextField({
+    version: 'AC1015', codepage: 'ANSI_1252', textBytes: Buffer.from([0xc3, 0xa9])
+  });
+  assert.equal(text, 'Ã©');
+});
+
+test('UTF-8 and UTF-16 BOMs override a stale DXF header codepage', async () => {
+  const source = dxfWithText({
+    version: 'AC1015', codepage: 'ANSI_936', textBytes: Buffer.from('日本語', 'utf8')
+  }).toString('utf8');
+  const buffers = [
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(source, 'utf8')]),
+    Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(source, 'utf16le')]),
+    Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(source, 'utf16le').swap16()])
+  ];
+  for (const buffer of buffers) {
+    const { document } = await new DxfLoader().load({ fileName: 'bom.dxf', buffer });
+    assert.equal(document.entities[0].text, '日本語');
+  }
+});
+
+test('incomplete or non-hex Unicode escapes remain literal text', async () => {
+  const source = String.raw`A\U+123 B\U+ZZZZ C\U+0041FACE`;
+  const text = await loadTextField({ version: 'AC1015', codepage: 'ANSI_1252', textBytes: ascii(source) });
+  assert.equal(text, String.raw`A\U+123 B\U+ZZZZ CAFACE`);
+});
+
+test('DXF text preserves its source so escaped literals cannot be decoded twice by rendering', async () => {
+  const source = String.raw`\\U+0041 \U+005CU+0042`;
+  const { document } = await new DxfLoader().load({
+    fileName: 'literal.dxf',
+    buffer: dxfWithText({ version: 'AC1032', codepage: 'ANSI_1252', textBytes: ascii(source) })
+  });
+  assert.equal(document.entities[0].rawText, source);
+  assert.equal(document.entities[0].text, String.raw`\U+0041 \U+0042`);
+});
+
+test('MTEXT keeps formatting source while exposing readable text to consumers', async () => {
+  const source = String.raw`{\W0.8;参考\U+80033D}\P第二行`;
+  const buffer = Buffer.from(dxfWithText({ version: 'AC1032', codepage: 'ANSI_936', textBytes: Buffer.from(source) })
+    .toString('utf8').replace('\nTEXT\n', '\nMTEXT\n'));
+  const { document } = await new DxfLoader().load({ fileName: 'mtext.dxf', buffer });
+  assert.equal(document.entities[0].rawText, source);
+  assert.equal(document.entities[0].text, '参考考3D\n第二行');
+});

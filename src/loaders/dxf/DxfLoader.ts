@@ -1,6 +1,7 @@
 import { addBlock, addLayer, createCadDocument, normalizeCadEntity, numberOrUndefined, pointFromUnknown, stringOrUndefined } from '../../core/entity.js';
 import { detectCadFormat, extensionOf, readInputBytes } from '../../core/format.js';
 import { degreesToRadians } from '../../core/geometry.js';
+import { parseCadText } from '../../core/text.js';
 import type { CadBlock, CadDocument, CadEntity, CadLayer, CadLoadInput, CadLoadOptions, CadLoadResult, CadLoader, CadPoint3D } from '../../core/types.js';
 import { applyDxfBomSupplement, parseDxfBomSupplement } from './DxfBomSupplement.js';
 
@@ -91,7 +92,8 @@ function normalizeDxfEntity(raw: Record<string, unknown>): CadEntity {
   }
   if (type === 'TEXT' || type === 'MTEXT' || type === 'ATTRIB' || type === 'ATTDEF') {
     entity.insertionPoint = pointFromUnknown(raw.startPoint ?? raw.position ?? raw.insertionPoint) ?? entity.insertionPoint;
-    entity.text = normalizeDxfText(raw.text ?? raw.string ?? raw.value) ?? entity.text;
+    entity.rawText = stringOrUndefined(raw.rawText ?? raw.text ?? raw.string ?? raw.value);
+    entity.text = normalizeDxfText(entity.rawText, type === 'MTEXT') ?? entity.text;
     entity.textHeight = numberOrUndefined(raw.textHeight ?? raw.height) ?? entity.textHeight;
     entity.rotation = normalizeRotation(raw.rotation ?? raw.angle);
   }
@@ -126,7 +128,7 @@ function normalizeDxfEntity(raw: Record<string, unknown>): CadEntity {
 }
 
 function extractDxfLayers(raw: Record<string, unknown>): Record<string, CadLayer> {
-  const result: Record<string, CadLayer> = {};
+  const result: Record<string, CadLayer> = Object.create(null);
   const tables = raw.tables as Record<string, unknown> | undefined;
   const layerTable = raw.layers ?? tables?.layer ?? tables?.LAYER ?? tables?.layers;
   const candidates = expandRecords(layerTable);
@@ -138,14 +140,16 @@ function extractDxfLayers(raw: Record<string, unknown>): Record<string, CadLayer
       name,
       color: (rec.color ?? rec.colorNumber ?? rec.colorIndex) as string | number | undefined,
       colorIndex: numberOrUndefined(rec.colorNumber ?? rec.colorIndex ?? rec.color),
+      trueColor: numberOrUndefined(rec.trueColor ?? rec.true_color),
       lineType: stringOrUndefined(rec.lineType ?? rec.linetype),
+      lineweight: numberOrUndefined(rec.lineweight ?? rec.lineWeight),
       // dxf-parser stores a negative layer color (62 < 0) as Math.abs(color)
       // plus visible:false, so the sign alone cannot detect a turned-off layer.
       isVisible: rec.isVisible === false || rec.visible === false || rec.off === true
         ? false
         : Number(rec.colorNumber ?? rec.colorIndex ?? rec.color ?? 1) >= 0,
-      isFrozen: Boolean(rec.isFrozen ?? rec.frozen),
-      isLocked: Boolean(rec.isLocked ?? rec.locked),
+      isFrozen: Boolean(rec.isFrozen ?? rec.frozen ?? (Number(rec.flags ?? rec.flag ?? 0) & 1)),
+      isLocked: Boolean(rec.isLocked ?? rec.locked ?? (Number(rec.flags ?? rec.flag ?? 0) & 4)),
       raw: rec
     });
   }
@@ -234,8 +238,10 @@ export function decodeDxfText(bytes: Uint8Array, preferredEncoding?: string): st
   const bomEncoding = detectBomEncoding(bytes);
   if (bomEncoding) return decodeBytes(bytes, bomEncoding);
 
-  const utf8 = decodeBytes(bytes, 'utf-8');
-  const utf8IsClean = !utf8.includes('\uFFFD');
+  // A literal replacement character is valid UTF-8. Validate the byte stream
+  // instead of treating every U+FFFD in the decoded drawing as an error.
+  let utf8: string | undefined;
+  try { utf8 = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { /* Legacy codepage below. */ }
   const declaredEncoding = normalizeDxfEncoding(detectDxfCodePage(bytes));
 
   // DXF R2007 (AC1021) and later store text as UTF-8 by specification, but
@@ -243,12 +249,12 @@ export function decodeDxfText(bytes: Uint8Array, preferredEncoding?: string): st
   // UTF-8 bytes must win over that declaration, otherwise CJK text turns into
   // mojibake. Legacy files that are not valid UTF-8 still use the declared
   // codepage below.
-  if (utf8IsClean && (declaredEncoding === 'utf-8' || isUtf8DxfVersion(detectDxfVersion(bytes)))) {
+  if (utf8 !== undefined && (declaredEncoding === 'utf-8' || isUtf8DxfVersion(detectDxfVersion(bytes)))) {
     return utf8;
   }
 
   if (declaredEncoding) return decodeBytes(bytes, declaredEncoding);
-  if (utf8IsClean) return utf8;
+  if (utf8 !== undefined) return utf8;
 
   return chooseBestLegacyDxfDecode(bytes);
 }
@@ -309,14 +315,20 @@ function detectBomEncoding(bytes: Uint8Array): string | undefined {
 function readDxfHeaderValue(bytes: Uint8Array, variable: string, valueCode: string): string | undefined {
   const header = decodeBytes(bytes.subarray(0, Math.min(bytes.byteLength, 128 * 1024)), 'iso-8859-1');
   const lines = header.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  for (let index = 0; index < lines.length - 3; index++) {
-    if (lines[index]?.trim() !== '9' || lines[index + 1]?.trim().toUpperCase() !== variable) continue;
-    for (let cursor = index + 2; cursor < Math.min(index + 10, lines.length - 1); cursor += 2) {
-      if (lines[cursor]?.trim() === valueCode) {
-        const value = lines[cursor + 1]?.trim();
-        if (value) return value;
-      }
+  let inHeader = false;
+  let currentVariable = '';
+  for (let index = 0; index < lines.length - 1; index += 2) {
+    const code = lines[index]?.trim();
+    const value = lines[index + 1]?.trim();
+    if (code === '0' && value?.toUpperCase() === 'SECTION') {
+      inHeader = lines[index + 2]?.trim() === '2' && lines[index + 3]?.trim().toUpperCase() === 'HEADER';
+      currentVariable = '';
+      continue;
     }
+    if (code === '0') { inHeader = false; currentVariable = ''; }
+    if (!inHeader) continue;
+    if (code === '9') currentVariable = value?.toUpperCase() ?? '';
+    else if (currentVariable === variable && code === valueCode && value) return value;
   }
   return undefined;
 }
@@ -391,21 +403,12 @@ function countMatches(text: string, pattern: RegExp): number {
   return text.match(pattern)?.length ?? 0;
 }
 
-function normalizeDxfText(value: unknown): string | undefined {
+function normalizeDxfText(value: unknown, multiline: boolean): string | undefined {
   const text = stringOrUndefined(value);
   if (text === undefined) return undefined;
-  return text
-    // AutoCAD writes \U+XXXX as a four-digit UTF-16 code unit; non-BMP
-    // characters arrive as two consecutive escapes (surrogate pair). Matching
-    // more than four digits swallows following literal text such as "3D".
-    .replace(/\\U\+([0-9a-fA-F]{4})/g, (match, code: string) => {
-      const point = Number.parseInt(code, 16);
-      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : match;
-    })
-    .replace(/%%[cC]/g, '\u2205')
-    .replace(/%%[dD]/g, '\u00b0')
-    .replace(/%%[pP]/g, '\u00b1')
-    .replace(/\\P/g, '\n');
+  // Keep the source separately for rendering: decoded backslashes must not be
+  // interpreted as a fresh control sequence when the document is drawn.
+  return parseCadText(text, multiline).text;
 }
 
 interface DxfPair { code: number; value: string }

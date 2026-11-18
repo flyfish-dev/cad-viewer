@@ -1,6 +1,7 @@
 import { applyByBlockColorInheritance, layerVisible, resolveCadColor, resolveFillColor } from '../core/color.js';
 import { computeCadDocumentBounds, resolveCadFitBounds } from '../core/bounds.js';
-import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includePoint, isFinitePoint, stripMTextFormatting, xy } from '../core/geometry.js';
+import { arcPoints, boundsValid, bulgeToPolylinePoints, clamp, ellipsePoints, emptyBounds, includePoint, isFinitePoint, xy } from '../core/geometry.js';
+import { cadTextLayoutBounds, layoutCadText, paintCadText, parseCadText, type CadTextLayout, type ParsedCadText } from '../core/text.js';
 import { cadEntityWorldStrokeWidth, inferEntityKind, isCadPolylineClosed } from '../core/entity.js';
 import { applyByBlockLineTypeInheritance, createDashedCadPrimitives, resolveCadLinePattern, transformCadLineTypeGlyph, type CadLineTypeMarker } from '../core/linetype.js';
 import { createCadSceneDocument } from '../core/scene.js';
@@ -34,7 +35,11 @@ interface GpuBatch {
 interface TextItem {
   point: CadPoint2D;
   text: string;
+  entity: CadEntity;
+  parsed: ParsedCadText;
+  layout?: CadTextLayout;
   height: number;
+  maxRunHeight: number;
   rotation: number;
   xScale: number;
   generationFlag: number;
@@ -447,22 +452,21 @@ export class CadWebGLRenderer {
     let drawn = 0;
     for (const item of items) {
       if (drawn >= maxLabels) break;
-      if (!boundsIntersects(item.bounds, visibleBounds)) continue;
       const pixelHeight = Math.abs(item.height) * this.view.scale;
-      if (pixelHeight < this.opts.textMinPixelHeight) continue;
+      if (pixelHeight * item.maxRunHeight < this.opts.textMinPixelHeight) continue;
+      if (!item.layout) {
+        item.layout = layoutCadText(ctx, item.entity, item.parsed);
+        item.bounds = cadTextLayoutBounds(item.entity, item.layout, item.point);
+      }
+      if (!boundsIntersects(item.bounds, visibleBounds)) continue;
       const s = this.worldToScreen(item.point);
-      if (s.x < -512 || s.y < -512 || s.x > this.cssWidth + 512 || s.y > this.cssHeight + 512) continue;
       ctx.save();
       ctx.translate(s.x, s.y);
       ctx.rotate(-item.rotation);
       ctx.scale((item.generationFlag & 2 ? -1 : 1) * item.xScale, item.generationFlag & 4 ? -1 : 1);
-      const fontSize = Math.max(4, Math.min(256, pixelHeight));
-      ctx.font = `${fontSize}px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       ctx.fillStyle = item.color;
       ctx.globalAlpha = item.opacity;
-      ctx.textAlign = item.halign === 1 || item.halign === 4 ? 'center' : item.halign === 2 ? 'right' : 'left';
-      ctx.textBaseline = item.valign === 1 ? 'bottom' : item.valign === 2 ? 'middle' : item.valign === 3 ? 'top' : 'alphabetic';
-      for (const [index, line] of item.text.split(/\r?\n/g).entries()) ctx.fillText(line, 0, index * fontSize * 1.22);
+      paintCadText(ctx, item.entity, pixelHeight, item.layout);
       ctx.restore();
       drawn++;
     }
@@ -898,18 +902,21 @@ class CpuSceneBuilder {
     const valign = Number(e.valign ?? 0);
     const aligned = (halign !== 0 || valign !== 0) && isFinitePoint(e.endPoint);
     const p = (aligned ? e.endPoint : e.insertionPoint ?? e.startPoint ?? e.center) as CadPoint3D | undefined;
-    const text = stripMTextFormatting(String(e.text ?? e.value ?? ''));
     const height = Number(e.textHeight ?? e.height ?? 1);
-    if (!isFinitePoint(p) || !text || !Number.isFinite(height)) return this.markSkipped(String(e.type));
+    const multiline = String(e.type).toUpperCase() === 'MTEXT';
+    const parsed = parseCadText(String(e.rawText ?? e.text ?? e.value ?? ''), multiline, height, e.fontFamily, multiline ? e.textStyleWidthFactor : 1);
+    const text = parsed.text;
+    if (!isFinitePoint(p) || !text || !Number.isFinite(height) || height === 0) return this.markSkipped(String(e.type));
     const point = xy(p);
     const xScale = Number(e.xScale ?? 1);
     const safeXScale = Number.isFinite(xScale) && Math.abs(xScale) > 1e-9 ? Math.abs(xScale) : 1;
-    const approxWidth = Math.max(1, text.split(/\r?\n/g).reduce((max, line) => Math.max(max, line.length), 0)) * Math.abs(height) * 0.62 * safeXScale;
-    const approxHeight = Math.max(1, text.split(/\r?\n/g).length) * Math.abs(height) * 1.22;
     this.textItems.push({
       point,
       text,
+      entity: e,
+      parsed,
       height,
+      maxRunHeight: parsed.paragraphs.reduce((max, paragraph) => paragraph.runs.reduce((value, run) => Math.max(value, run.style.height), max), 1),
       rotation: Number(e.rotation ?? 0),
       xScale: safeXScale,
       generationFlag: Number(e.generationFlag ?? 0),
@@ -917,7 +924,8 @@ class CpuSceneBuilder {
       valign,
       color: resolveCadColor(e, this.document, this.colorOptions()),
       opacity: clamp(Number(e.opacity ?? 1), 0, 1),
-      bounds: { minX: point.x - approxWidth, minY: point.y - approxHeight, maxX: point.x + approxWidth, maxY: point.y + approxHeight }
+      // The overlay measures the complete layout before its first culling pass.
+      bounds: { minX: point.x, minY: point.y, maxX: point.x, maxY: point.y }
     });
     this.stats.drawn++;
   }
@@ -959,6 +967,14 @@ class CpuSceneBuilder {
   }
 
   private addHatchEntity(e: CadEntity): void {
+    if (e.hatch) {
+      if (e.hatch.status !== 'ready') return this.markSkipped('HATCH');
+      const color = this.strokeBytes(e);
+      for (const segment of e.hatch.segments) this.addPolyline([xy(segment.start), xy(segment.end)], false, color);
+      for (const point of e.hatch.dots) this.addLineTypePoint(xy(point), color);
+      this.stats.drawn++;
+      return;
+    }
     const loops = e.loops;
     if (!Array.isArray(loops) || loops.length === 0) return this.markSkipped('HATCH');
     const stroke = this.strokeBytes(e);

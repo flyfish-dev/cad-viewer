@@ -97,6 +97,13 @@ export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity 
       commands: transformPathCommands(loop.commands, matrix)
     }));
   }
+  if (entity.hatch) {
+    clone.hatch = {
+      ...entity.hatch,
+      segments: entity.hatch.segments.map(segment => ({ start: transformPoint(segment.start, matrix), end: transformPoint(segment.end, matrix) })),
+      dots: entity.hatch.dots.map(point => transformPoint(point, matrix))
+    };
+  }
 
   if (typeof entity.radius === 'number' && Number.isFinite(scaleApprox)) clone.radius = entity.radius * scaleApprox;
   if (typeof entity.constantWidth === 'number' && Number.isFinite(scaleApprox)) clone.constantWidth = entity.constantWidth * scaleApprox;
@@ -105,7 +112,8 @@ export function transformEntity(entity: CadEntity, matrix: Matrix2D): CadEntity 
   if (entity.kind === 'text' || /^(TEXT|MTEXT|ATTRIB|ATTDEF|DIMENSION)$/i.test(String(entity.type ?? ''))) {
     if (typeof entity.textHeight === 'number' && Number.isFinite(scaleY)) clone.textHeight = entity.textHeight * scaleY;
     if (typeof entity.height === 'number' && Number.isFinite(scaleY)) clone.height = entity.height * scaleY;
-    if (typeof entity.xScale === 'number' && scaleY > 1e-14 && Number.isFinite(scaleX)) clone.xScale = entity.xScale * scaleX / scaleY;
+    if (scaleY > 1e-14 && Number.isFinite(scaleX)) clone.xScale = Number(entity.xScale ?? 1) * scaleX / scaleY;
+    if (String(entity.type).toUpperCase() === 'MTEXT' && typeof entity.width === 'number' && Number.isFinite(scaleX)) clone.width = entity.width * scaleX;
   }
   const rotation = Math.atan2(matrix.b, matrix.a);
   const ellipseAnglesAreRelative = entity.kind === 'ellipse' || String(entity.type ?? '').toUpperCase() === 'ELLIPSE';

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.4 (candidate, not published)
+
+### Fixed
+
+- Decode CAD Unicode and text controls in one pass without exposing hexadecimal parameters, swallowing following text, or reinterpreting escaped literals.
+- Preserve MTEXT reference width, attachment, line spacing and DWG text-style metrics across worker transfer. Canvas2D and WebGL share measured wrapping and text layout, including inline font, height and width overrides.
+- Keep MTEXT layout consistent through zoom, rotated text and non-uniform block scaling, and use measured layout bounds for WebGL text culling.
+- Preserve straight closed HATCH boundaries and compile their embedded line/dot pattern definitions once for both renderers. Restore all eight pattern fills in the supplied DWG, with island clipping, block transforms and bounded geometry generation.
+- Fix DXF UTF-8/codepage detection and four-digit Unicode escapes, including attributes and BOM text (issue #5; contribution from PR #7).
+- Restore DXF layer tables and their visible, frozen, locked, true-color, linetype and lineweight properties, including special layer names (issue #6; contribution from PR #8).
+
+### Validation and remaining dependency work
+
+- Reproduced the reported DWG text overflow with the supplied file and verified corrected wrapping with a real Canvas2D implementation.
+- The DWF Gouraud opcode fix for issue #2 is prepared in `flyfish-dev/dwf-viewer` 0.6.8. This candidate retains the published `dwf-viewer@^0.6.7` dependency; issue #2 remains open until the upstream package is published and the lockfile is updated.
+- Browser end-to-end acceptance remains separate from the local parser, Canvas and package checks because this execution environment blocks browser startup and local-file navigation.
+- Curved/gradient HATCH boundaries and full SHX text-font fidelity remain outside this patch; unsupported hatch definitions retain diagnostics instead of being replaced with a fabricated solid fill.
+
 ## 0.8.2 (candidate, not published)
 
 - Normalize DXF LINE vertices to start/end points, including lines in BLOCKs, without changing parser-owned data.

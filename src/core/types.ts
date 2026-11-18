@@ -247,9 +247,21 @@ export interface CadEntity {
 
   insertionPoint?: CadPoint3D;
   text?: string;
+  /** Original CAD text before decoding; prevents escaped literals from being decoded twice. */
+  rawText?: string;
   value?: string;
   height?: number;
   textHeight?: number;
+  /** Resolved TrueType family; SHX names retain the renderer's fallback font. */
+  fontFamily?: string;
+  /** MTEXT's inherited STYLE width factor, replaced by an inline \\W override. */
+  textStyleWidthFactor?: number;
+  /** MTEXT attachment point: top/middle/bottom rows, left/center/right columns (1–9). */
+  attachmentPoint?: number;
+  /** MTEXT line-spacing multiplier, in the DXF range 0.25–4. */
+  lineSpacingFactor?: number;
+  /** MTEXT spacing: 1 = at least; 2 = exact. */
+  lineSpacingStyle?: number;
   /** TEXT width factor, where 1 is the authored glyph width. */
   xScale?: number;
   generationFlag?: number;
@@ -278,6 +290,8 @@ export interface CadEntity {
   table?: CadTableData;
 
   loops?: Array<{ vertices?: CadPoint3D[]; commands?: CadPathCommand[]; isClosed?: boolean }>;
+  /** Clipped authored HATCH pattern geometry, shared by Canvas and WebGL. */
+  hatch?: CadHatchGeometry;
   commands?: CadPathCommand[];
   imageSource?: string;
   imageDataUrl?: string;
@@ -286,6 +300,16 @@ export interface CadEntity {
 
   raw?: unknown;
   [key: string]: unknown;
+}
+
+export interface CadHatchGeometry {
+  status: 'ready' | 'unsupported' | 'budget-exceeded';
+  patternName?: string;
+  segments: Array<{ start: CadPoint3D; end: CadPoint3D }>;
+  dots: CadPoint3D[];
+  diagnostics: string[];
+  /** Clone-safe source definitions retained for unsupported/limited patterns. */
+  source?: CadDataValue;
 }
 
 export interface CadBlock {

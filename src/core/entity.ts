@@ -1,3 +1,4 @@
+import { normalizeCadHatch } from './hatch.js';
 import type {
   CadBlock,
   CadDataValue,
@@ -137,13 +138,27 @@ export function normalizeCadEntity(raw: Record<string, unknown>, forcedType?: st
   entity.axisRatio = numberOrUndefined(raw.axisRatio ?? raw.ratio) ?? entity.axisRatio;
   entity.height = numberOrUndefined(raw.height ?? raw.textHeight ?? nestedText?.textHeight) ?? entity.height;
   entity.textHeight = numberOrUndefined(raw.textHeight ?? raw.height ?? nestedText?.textHeight) ?? entity.textHeight;
+  entity.fontFamily = stringOrUndefined(raw.fontFamily ?? nestedText?.fontFamily) ?? entity.fontFamily;
+  entity.textStyleWidthFactor = numberOrUndefined(raw.textStyleWidthFactor) ?? entity.textStyleWidthFactor;
+  if (type === 'MTEXT') {
+    // Explicitly retain these in worker payloads where unknown properties are omitted.
+    entity.width = numberOrUndefined(raw.rectWidth ?? raw.width ?? raw.referenceWidth ?? raw.rect_width) ?? entity.width;
+    entity.attachmentPoint = numberOrUndefined(raw.attachmentPoint ?? raw.attachment ?? raw.attachment_point) ?? entity.attachmentPoint;
+    entity.lineSpacingFactor = numberOrUndefined(raw.lineSpacingFactor ?? raw.lineSpacing ?? raw.linespace_factor) ?? entity.lineSpacingFactor;
+    entity.lineSpacingStyle = numberOrUndefined(raw.lineSpacingStyle ?? raw.linespace_style) ?? entity.lineSpacingStyle;
+  }
   entity.xScale = numberOrUndefined(raw.xScale ?? raw.widthFactor ?? nestedText?.xScale) ?? entity.xScale;
   entity.generationFlag = numberOrUndefined(raw.generationFlag ?? raw.textGenerationFlag ?? nestedText?.generationFlag) ?? entity.generationFlag;
   entity.halign = numberOrUndefined(raw.halign ?? raw.horizontalAlignment ?? nestedText?.halign) ?? entity.halign;
   entity.valign = numberOrUndefined(raw.valign ?? raw.verticalAlignment ?? nestedText?.valign) ?? entity.valign;
   entity.extrusionDirection = pointFromUnknown(raw.extrusionDirection ?? raw.extrusion ?? nestedText?.extrusionDirection) ?? entity.extrusionDirection;
   entity.rotation = numberOrUndefined(raw.rotation ?? raw.angle ?? nestedText?.rotation) ?? entity.rotation;
+  if (type === 'MTEXT' && entity.rotation === undefined) {
+    const direction = pointFromUnknown(raw.direction ?? raw.directionVector ?? raw.x_axis_dir);
+    if (direction && Math.hypot(direction.x, direction.y) > 1e-12) entity.rotation = Math.atan2(direction.y, direction.x);
+  }
   entity.text = stringOrUndefined(nestedText?.text ?? raw.text ?? raw.value ?? raw.string ?? raw.contents ?? raw.defaultValue ?? raw.default_value) ?? entity.text;
+  entity.rawText = stringOrUndefined(raw.rawText) ?? entity.rawText;
   entity.value = stringOrUndefined(raw.value ?? nestedText?.text ?? raw.text ?? raw.string ?? raw.contents ?? raw.defaultValue ?? raw.default_value) ?? entity.value;
   entity.name = stringOrUndefined(raw.name ?? raw.blockName) ?? entity.name;
   entity.blockName = stringOrUndefined(raw.blockName ?? raw.name) ?? entity.blockName;
@@ -189,6 +204,14 @@ export function normalizeCadEntity(raw: Record<string, unknown>, forcedType?: st
   }
   if (type === 'TABLE' || type === 'ACAD_TABLE' || type === 'ACDBTABLE') {
     entity.table = normalizeCadTableData(raw);
+  }
+  if (type === 'HATCH' && Array.isArray(raw.boundaryPaths)) {
+    const normalized = normalizeCadHatch(raw);
+    entity.loops = normalized.loops;
+    entity.hatch = normalized.hatch;
+    if (entity.hatch.status !== 'ready') {
+      entity.hatch.source = normalizeCadDataValue({ boundaryPaths: raw.boundaryPaths, definitionLines: raw.definitionLines, patternName: raw.patternName, solidFill: raw.solidFill, hatchStyle: raw.hatchStyle, extrusionDirection: raw.extrusionDirection });
+    }
   }
   return entity;
 }

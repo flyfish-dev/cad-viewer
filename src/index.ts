@@ -50,6 +50,7 @@ export type {
   CadEntityKind,
   CadFitMode,
   CadFormat,
+  CadHatchGeometry,
   CadLayer,
   CadLineType,
   CadLineTypeElement,
