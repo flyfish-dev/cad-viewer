@@ -677,9 +677,12 @@ function decodeCadText(value: unknown): string | undefined {
   const text = stringOrUndefined(value);
   if (text === undefined) return undefined;
   return text
-    .replace(/\\U\+([0-9a-fA-F]{4,6})/g, (match, code: string) => {
+    // Keep in sync with normalizeDxfText() in DxfLoader.ts: \U+XXXX is a
+    // four-digit UTF-16 code unit, so trailing literal hex text must not be
+    // consumed as part of the escape.
+    .replace(/\\U\+([0-9a-fA-F]{4})/g, (match, code: string) => {
       const point = Number.parseInt(code, 16);
-      return Number.isFinite(point) && point <= 0x10ffff ? String.fromCodePoint(point) : match;
+      return Number.isFinite(point) && point >= 0 && point <= 0x10ffff ? String.fromCodePoint(point) : match;
     })
     .replace(/%%[cC]/g, '\u2205')
     .replace(/%%[dD]/g, '\u00b0')
